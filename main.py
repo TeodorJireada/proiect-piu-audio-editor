@@ -1,12 +1,12 @@
 import sys
-from PyQt6.QtWidgets import QApplication
-from ui.player_widget import AudioPlayer
+import os
+from PySide6.QtWidgets import QApplication
 from ui.main_window import MainWindow
+
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    # window = AudioPlayer()
-
+    app.setApplicationName("DAW proiect PIU")
     window = MainWindow()
     window.show()
     sys.exit(app.exec())
