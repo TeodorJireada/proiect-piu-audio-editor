@@ -5,3 +5,6 @@ class AudioTrackData:
         self.data = data
         self.sample_rate = sample_rate
         self.waveform = None
+        self.is_muted = False
+        self.is_soloed = False
+        self.start_sample = 0
