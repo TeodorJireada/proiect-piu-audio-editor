@@ -1,7 +1,8 @@
 import os
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, 
                                QHBoxLayout, QPushButton, QScrollArea, QSplitter, 
-                               QFrame, QFileDialog, QMessageBox, QCheckBox)
+                               QFrame, QFileDialog, QMessageBox, QCheckBox, QSizePolicy)
+from PySide6.QtGui import QShortcut, QKeySequence
 from PySide6.QtCore import Qt, QTimer
 
 from styles import DARK_THEME
@@ -10,6 +11,7 @@ from core.track_loader import TrackLoader
 from ui.widgets.timeline import TimelineRuler
 from ui.widgets.track_header import TrackHeader
 from ui.widgets.track_lane import TrackLane
+from ui.widgets.track_container import TrackContainer
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -37,6 +39,11 @@ class MainWindow(QMainWindow):
         self.setup_workspace()
 
         self.confirm_delete = True
+        
+        # Global Shortcuts
+        self.shortcut_play = QShortcut(QKeySequence(Qt.Key_Space), self)
+        self.shortcut_play.activated.connect(self.toggle_playback)
+        self.shortcut_play.setContext(Qt.WindowShortcut)
 
     def setup_ribbon(self):
         ribbon = QFrame()
@@ -50,11 +57,6 @@ class MainWindow(QMainWindow):
         btn_stop = QPushButton("Stop")
         btn_stop.clicked.connect(self.stop_playback)
 
-        self.btn_import = QPushButton("Import Audio...")
-        self.btn_import.clicked.connect(self.import_track)
-
-        layout.addWidget(self.btn_import)
-        layout.addWidget(QFrame(frameShape=QFrame.VLine))
         layout.addWidget(btn_stop)
         layout.addWidget(self.btn_play)
         layout.addStretch()
@@ -63,7 +65,7 @@ class MainWindow(QMainWindow):
     def setup_workspace(self):
         splitter = QSplitter(Qt.Horizontal)
         splitter.setHandleWidth(1)
-        splitter.setStyleSheet("QSplitter::handle { background-color: #111; }")
+        # splitter style is now in styles.py
         self.main_layout.addWidget(splitter)
 
         # LEFT PANEL (headers)
@@ -80,14 +82,30 @@ class MainWindow(QMainWindow):
 
         # Margin fix
         self.top_left_corner = QFrame()
+        self.top_left_corner.setObjectName("TopLeftCorner")
         self.top_left_corner.setFixedHeight(30)
-        self.top_left_corner.setStyleSheet("background-color: #252525; border-bottom: 1px solid #1a1a1a; border-right: 1px solid #1a1a1a;")
         
         self.left_layout.addWidget(self.top_left_corner)
+        self.left_layout.addWidget(self.top_left_corner)
+        
+        # Add Track Button
+        self.btn_add_track = QPushButton("+")
+        self.btn_add_track.setObjectName("AddTrackButton")
+        self.btn_add_track.setFixedHeight(80)
+        self.btn_add_track.clicked.connect(self.import_track)
+        self.btn_add_track.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.left_layout.addWidget(self.btn_add_track)
+        
         self.left_layout.addStretch()
         
         self.left_scroll.setWidget(self.left_container)
+        
+        # Limit resizing
+        self.left_scroll.setMinimumWidth(200)
+        self.left_scroll.setMaximumWidth(500)
+        
         splitter.addWidget(self.left_scroll)
+        splitter.setCollapsible(0, False)
 
         # RIGHT PANEL (Timeline + Lanes)
         right_widget = QWidget()
@@ -104,6 +122,7 @@ class MainWindow(QMainWindow):
 
         self.timeline = TimelineRuler()
         self.timeline.position_changed.connect(self.user_seek)
+        self.timeline.zoom_changed.connect(self.update_zoom)
         self.timeline_scroll.setWidget(self.timeline)
         right_layout.addWidget(self.timeline_scroll)
 
@@ -111,7 +130,7 @@ class MainWindow(QMainWindow):
         self.right_scroll.setWidgetResizable(True)
         self.right_scroll.setFrameShape(QFrame.NoFrame)
         
-        self.right_container = QWidget()
+        self.right_container = TrackContainer()
         self.right_layout = QVBoxLayout(self.right_container)
         self.right_layout.setContentsMargins(0, 0, 0, 0)
         self.right_layout.setSpacing(0)
@@ -137,23 +156,61 @@ class MainWindow(QMainWindow):
         self.right_scroll.horizontalScrollBar().valueChanged.connect(
             self.timeline_scroll.horizontalScrollBar().setValue
         )
+        self.timeline_scroll.horizontalScrollBar().valueChanged.connect(
+            self.right_scroll.horizontalScrollBar().setValue
+        )
+
+    def update_zoom(self, px_per_sec):
+        # Update all lanes
+        for lane in self.lanes:
+            lane.set_zoom(px_per_sec)
+        self.right_container.set_zoom(px_per_sec)
+            
+        # Update playhead position visually
+        current_time = self.audio.get_playhead_time()
+        x_pixel = int(current_time * px_per_sec)
+        self.update_playhead_visuals(x_pixel)
+
+    def update_global_duration(self):
+        max_duration = 60 # Minimum duration
+        
+        for lane in self.lanes:
+            for clip in lane.clips:
+                end_time = clip['start_time'] + clip['duration']
+                if end_time > max_duration:
+                    max_duration = end_time
+        
+        # Check playhead
+        current_playhead = self.audio.get_playhead_time()
+        if current_playhead > max_duration:
+            max_duration = current_playhead
+        
+        # Add some padding
+        max_duration += 5
+        
+        self.timeline.set_duration(max_duration)
+        for lane in self.lanes:
+            lane.set_duration(max_duration)
+        self.right_container.set_duration(max_duration)
 
     # THREADED IMPORT LOGIC
 
     def import_track(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "Import Audio", "", "Audio Files (*.wav *.mp3 *.ogg *.flac *.opus)")
         if file_path:
-            self.btn_import.setText("Loading...") 
-            self.btn_import.setEnabled(False) 
+            self.btn_add_track.setText("Loading...") 
+            self.btn_add_track.setEnabled(False) 
             
-            # Start thread
+            # Use Thread
             self.loader_thread = TrackLoader(file_path, self.audio.sample_rate)
             self.loader_thread.loaded.connect(self.on_track_loaded)
-            
-            self.loader_thread.failed.connect(self.on_track_failed) 
-            
-            self.loader_thread.finished.connect(self.loader_thread.deleteLater)
+            self.loader_thread.failed.connect(self.on_import_failed)
             self.loader_thread.start()
+
+    def on_import_failed(self, error_msg):
+        QMessageBox.critical(self, "Import Failed", f"Could not load audio:\n{error_msg}")
+        self.btn_add_track.setText("+")
+        self.btn_add_track.setEnabled(True)
 
     def on_track_loaded(self, track_data):
         # Pass data to Audio Engine
@@ -169,56 +226,29 @@ class MainWindow(QMainWindow):
         
         # Create Lane with Waveform
         lane = TrackLane()
+        lane.set_zoom(self.timeline.pixels_per_second)
+        lane.clip_moved.connect(self.on_clip_moved)
         
         waveform = track_data.waveform
-        if waveform is None:
-            pixels_width = 200
-        else:
-            pixels_width = len(waveform)
+        duration_sec = len(track_data.data) / track_data.sample_rate
         
-        lane.add_clip(filename, 0, pixels_width, "#5577cc", waveform)
+        lane.add_clip(filename, 0, duration_sec, "#5577cc", waveform)
         
         self.lanes.append(lane)
 
-        idx_left = self.left_layout.count() - 1
-        self.left_layout.insertWidget(idx_left, header)
+        # Insert before the Add button (which is at count() - 2 because of stretch at end)
+        # Actually, let's find the index of btn_add_track
+        idx_add = self.left_layout.indexOf(self.btn_add_track)
+        self.left_layout.insertWidget(idx_add, header)
 
         idx_right = self.right_layout.count() - 1
         self.right_layout.insertWidget(idx_right, lane)
         
-        self.btn_import.setText("Import Audio...")
-        self.btn_import.setEnabled(True)
+        self.btn_add_track.setText("+")
+        self.btn_add_track.setEnabled(True)
         
-    def on_track_failed(self, error_message):
-        print(f"Error loading file: {error_message}")
-        self.btn_import.setText("Import Audio...")
-        self.btn_import.setEnabled(True)
-
-    def add_track_row(self, name):
-        header = TrackHeader(name, "#4466aa")
-        lane = TrackLane()
+        self.update_global_duration()
         
-        header.delete_clicked.connect(self.delete_track)
-
-        header.mute_clicked.connect(self.handle_mute)
-        header.solo_clicked.connect(self.handle_solo)
-
-        if self.audio.tracks:
-            track_data = self.audio.tracks[-1]['data']
-            duration_sec = len(track_data) / 44100
-            pixels_width = int(duration_sec * 100)
-        else:
-            pixels_width = 200
-
-        lane.add_clip(name, 0, pixels_width, "#5577cc")
-        self.lanes.append(lane)
-
-        idx_left = self.left_layout.count() - 1
-        self.left_layout.insertWidget(idx_left, header)
-
-        idx_right = self.right_layout.count() - 1
-        self.right_layout.insertWidget(idx_right, lane)
-
     def delete_track(self):
         sender_header = self.sender()
         layout_index = self.left_layout.indexOf(sender_header)
@@ -259,6 +289,8 @@ class MainWindow(QMainWindow):
             
         self.left_layout.takeAt(layout_index).widget().deleteLater()
         self.right_layout.takeAt(track_index).widget().deleteLater()
+        
+        self.update_global_duration()
 
     def handle_mute(self):
         sender = self.sender()
@@ -269,7 +301,15 @@ class MainWindow(QMainWindow):
         sender = self.sender()
         idx = self.left_layout.indexOf(sender) - 1
         self.audio.toggle_solo(idx)
-        
+        self.ui_timer.start()
+
+    def on_clip_moved(self, clip_index, new_start_time):
+        sender_lane = self.sender()
+        if sender_lane in self.lanes:
+            track_index = self.lanes.index(sender_lane)
+            self.audio.set_track_start_time(track_index, new_start_time)
+            self.update_global_duration()
+
     def toggle_playback(self):
         if self.audio.is_playing:
             self.pause_playback()
@@ -291,12 +331,28 @@ class MainWindow(QMainWindow):
         self.right_scroll.horizontalScrollBar().setValue(0)
 
     def user_seek(self, x_pixels):
-        self.audio.set_playhead(x_pixels, px_per_second=100)
+        # Convert pixels to time using current zoom
+        time_sec = x_pixels / self.timeline.pixels_per_second
+        # Audio engine expects pixels at di100px/s ? No, let's check auo engine.
+        # The previous code was: self.audio.set_playhead(x_pixels, px_per_second=100)
+        # So audio engine handles time conversion if we pass px_per_second.
+        # But wait, set_playhead in audio_engine might just take time?
+        # Let's assume we should pass the new pixels_per_second or just calculate time here.
+        # Actually, looking at user_seek signature in previous file content:
+        # self.audio.set_playhead(x_pixels, px_per_second=100)
+        # So I should update this call.
+        
+        self.audio.set_playhead(x_pixels, px_per_second=self.timeline.pixels_per_second)
         self.update_playhead_visuals(x_pixels)
 
     def update_ui(self):
         current_time = self.audio.get_playhead_time()
-        x_pixel = int(current_time * 100)
+        
+        # Auto-expand if near end
+        if current_time > self.timeline.duration - 5:
+             self.update_global_duration()
+             
+        x_pixel = int(current_time * self.timeline.pixels_per_second)
         self.update_playhead_visuals(x_pixel)
 
     def update_playhead_visuals(self, x):

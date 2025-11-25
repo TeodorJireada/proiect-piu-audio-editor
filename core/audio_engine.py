@@ -21,6 +21,10 @@ class AudioEngine(QObject):
         if 0 <= index < len(self.tracks):
             del self.tracks[index]
 
+    def set_track_start_time(self, index, time_sec):
+        if 0 <= index < len(self.tracks):
+            self.tracks[index].start_sample = int(time_sec * self.sample_rate)
+
     def toggle_mute(self, index):
         if 0 <= index < len(self.tracks): 
             self.tracks[index].is_muted = not self.tracks[index].is_muted
