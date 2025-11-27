@@ -1,4 +1,6 @@
 __pycache__
 venv/
 .vscode/
-assets/
+test_tracks/
+
+*.zip
