@@ -4,7 +4,7 @@ from PySide6.QtWidgets import QWidget
 
 class TimelineRuler(QWidget):
     position_changed = Signal(int)
-    zoom_changed = Signal(float)
+    zoom_request = Signal(float, object) # delta, global_pos
 
     def __init__(self):
         super().__init__()
@@ -33,20 +33,9 @@ class TimelineRuler(QWidget):
         self.setMinimumWidth(width)
 
     def wheelEvent(self, event):
-        # Zoom in/out
+        # Delegate zoom to parent/controller
         delta = event.angleDelta().y()
-        if delta > 0:
-            self.pixels_per_second *= 1.1
-        else:
-            self.pixels_per_second /= 1.1
-        
-        # Clamp values
-        self.pixels_per_second = max(1.0, min(1000.0, self.pixels_per_second))
-        # self.pixels_per_second = int(self.pixels_per_second) # Remove int cast to allow float
-        
-        self.update_width()
-        self.zoom_changed.emit(self.pixels_per_second)
-        self.update()
+        self.zoom_request.emit(delta, event.globalPosition())
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:

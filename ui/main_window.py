@@ -12,6 +12,9 @@ from ui.widgets.timeline import TimelineRuler
 from ui.widgets.track_header import TrackHeader
 from ui.widgets.track_lane import TrackLane
 from ui.widgets.track_container import TrackContainer
+from ui.widgets.ribbon import Ribbon
+from ui.track_manager import TrackManager
+from core.command_stack import UndoStack
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -22,6 +25,8 @@ class MainWindow(QMainWindow):
 
         # AUDIO ENGINE
         self.audio = AudioEngine() 
+        self.undo_stack = UndoStack()
+        self.undo_stack.stack_changed.connect(self.update_undo_redo_buttons)
         
         self.ui_timer = QTimer()
         self.ui_timer.interval = 30 # 30ms refresh rate
@@ -45,22 +50,26 @@ class MainWindow(QMainWindow):
         self.shortcut_play.activated.connect(self.toggle_playback)
         self.shortcut_play.setContext(Qt.WindowShortcut)
 
-    def setup_ribbon(self):
-        ribbon = QFrame()
-        ribbon.setObjectName("Ribbon")
-        ribbon.setFixedHeight(60)
-        layout = QHBoxLayout(ribbon)
-        
-        self.btn_play = QPushButton("Play")
-        self.btn_play.clicked.connect(self.toggle_playback)
-        
-        btn_stop = QPushButton("Stop")
-        btn_stop.clicked.connect(self.stop_playback)
+        self.shortcut_undo = QShortcut(QKeySequence("Ctrl+Z"), self)
+        self.shortcut_undo.activated.connect(self.undo_action)
+        self.shortcut_undo.setContext(Qt.WindowShortcut)
 
-        layout.addWidget(btn_stop)
-        layout.addWidget(self.btn_play)
-        layout.addStretch()
-        self.main_layout.addWidget(ribbon)
+        self.shortcut_redo = QShortcut(QKeySequence("Ctrl+Y"), self)
+        self.shortcut_redo.activated.connect(self.redo_action)
+        self.shortcut_redo.setContext(Qt.WindowShortcut)
+        
+        # Alternative Redo (Ctrl+Shift+Z)
+        self.shortcut_redo_alt = QShortcut(QKeySequence("Ctrl+Shift+Z"), self)
+        self.shortcut_redo_alt.activated.connect(self.redo_action)
+        self.shortcut_redo_alt.setContext(Qt.WindowShortcut)
+
+    def setup_ribbon(self):
+        self.ribbon = Ribbon()
+        self.ribbon.play_clicked.connect(self.toggle_playback)
+        self.ribbon.stop_clicked.connect(self.stop_playback)
+        self.ribbon.undo_clicked.connect(self.undo_action)
+        self.ribbon.redo_clicked.connect(self.redo_action)
+        self.main_layout.addWidget(self.ribbon)
 
     def setup_workspace(self):
         splitter = QSplitter(Qt.Horizontal)
@@ -85,7 +94,6 @@ class MainWindow(QMainWindow):
         self.top_left_corner.setObjectName("TopLeftCorner")
         self.top_left_corner.setFixedHeight(30)
         
-        self.left_layout.addWidget(self.top_left_corner)
         self.left_layout.addWidget(self.top_left_corner)
         
         # Add Track Button
@@ -122,7 +130,7 @@ class MainWindow(QMainWindow):
 
         self.timeline = TimelineRuler()
         self.timeline.position_changed.connect(self.user_seek)
-        self.timeline.zoom_changed.connect(self.update_zoom)
+        self.timeline.zoom_request.connect(self.handle_timeline_zoom) # Connect new signal
         self.timeline_scroll.setWidget(self.timeline)
         right_layout.addWidget(self.timeline_scroll)
 
@@ -143,6 +151,19 @@ class MainWindow(QMainWindow):
 
         self.sync_scrollbars()
 
+        # Initialize Track Manager
+        self.track_manager = TrackManager(
+            self, 
+            self.audio, 
+            self.undo_stack, 
+            self.timeline, 
+            self.left_layout, 
+            self.right_layout, 
+            self.btn_add_track,
+            self.right_container
+        )
+
+
     def sync_scrollbars(self):
         # Sync Vertical Scroll
         self.left_scroll.verticalScrollBar().valueChanged.connect(
@@ -161,10 +182,7 @@ class MainWindow(QMainWindow):
         )
 
     def update_zoom(self, px_per_sec):
-        # Update all lanes
-        for lane in self.lanes:
-            lane.set_zoom(px_per_sec)
-        self.right_container.set_zoom(px_per_sec)
+        self.track_manager.update_zoom(px_per_sec)
             
         # Update playhead position visually
         current_time = self.audio.get_playhead_time()
@@ -172,161 +190,45 @@ class MainWindow(QMainWindow):
         self.update_playhead_visuals(x_pixel)
 
     def update_global_duration(self):
-        max_duration = 60 # Minimum duration
-        
-        for lane in self.lanes:
-            for clip in lane.clips:
-                end_time = clip['start_time'] + clip['duration']
-                if end_time > max_duration:
-                    max_duration = end_time
-        
-        # Check playhead
-        current_playhead = self.audio.get_playhead_time()
-        if current_playhead > max_duration:
-            max_duration = current_playhead
-        
-        # Add some padding
-        max_duration += 5
-        
-        self.timeline.set_duration(max_duration)
-        for lane in self.lanes:
-            lane.set_duration(max_duration)
-        self.right_container.set_duration(max_duration)
+        self.track_manager.update_global_duration()
 
     # THREADED IMPORT LOGIC
 
     def import_track(self):
-        file_path, _ = QFileDialog.getOpenFileName(self, "Import Audio", "", "Audio Files (*.wav *.mp3 *.ogg *.flac *.opus)")
-        if file_path:
-            self.btn_add_track.setText("Loading...") 
-            self.btn_add_track.setEnabled(False) 
-            
-            # Use Thread
-            self.loader_thread = TrackLoader(file_path, self.audio.sample_rate)
-            self.loader_thread.loaded.connect(self.on_track_loaded)
-            self.loader_thread.failed.connect(self.on_import_failed)
-            self.loader_thread.start()
+        self.track_manager.import_track()
 
-    def on_import_failed(self, error_msg):
-        QMessageBox.critical(self, "Import Failed", f"Could not load audio:\n{error_msg}")
-        self.btn_add_track.setText("+")
-        self.btn_add_track.setEnabled(True)
+    def undo_action(self):
+        self.undo_stack.undo()
 
-    def on_track_loaded(self, track_data):
-        # Pass data to Audio Engine
-        self.audio.add_track_data(track_data)
-        
-        # Create Header
-        filename = os.path.basename(track_data.name)
-        
-        header = TrackHeader(filename, "#4466aa")
-        header.delete_clicked.connect(self.delete_track)
-        header.mute_clicked.connect(self.handle_mute)
-        header.solo_clicked.connect(self.handle_solo)
-        
-        # Create Lane with Waveform
-        lane = TrackLane()
-        lane.set_zoom(self.timeline.pixels_per_second)
-        lane.clip_moved.connect(self.on_clip_moved)
-        
-        waveform = track_data.waveform
-        duration_sec = len(track_data.data) / track_data.sample_rate
-        
-        lane.add_clip(filename, 0, duration_sec, "#5577cc", waveform)
-        
-        self.lanes.append(lane)
+    def redo_action(self):
+        self.undo_stack.redo()
 
-        # Insert before the Add button (which is at count() - 2 because of stretch at end)
-        # Actually, let's find the index of btn_add_track
-        idx_add = self.left_layout.indexOf(self.btn_add_track)
-        self.left_layout.insertWidget(idx_add, header)
+    def update_undo_redo_buttons(self):
+        self.ribbon.update_undo_redo_state(self.undo_stack.can_undo(), self.undo_stack.can_redo())
 
-        idx_right = self.right_layout.count() - 1
-        self.right_layout.insertWidget(idx_right, lane)
-        
-        self.btn_add_track.setText("+")
-        self.btn_add_track.setEnabled(True)
-        
-        self.update_global_duration()
-        
-    def delete_track(self):
-        sender_header = self.sender()
-        layout_index = self.left_layout.indexOf(sender_header)
-        if layout_index == -1: return 
 
-        if self.confirm_delete:
-            msg = QMessageBox(self)
-            msg.setWindowTitle("Delete Track")
-            msg.setText("Are you sure you want to delete this track?")
-            msg.setInformativeText("This action cannot be undone.")
-            msg.setIcon(QMessageBox.Warning)
-            
-            # Add buttons
-            msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
-            msg.setDefaultButton(QMessageBox.No)
-            
-            cb = QCheckBox("Don't ask me again")
-            msg.setCheckBox(cb)
-            
-            response = msg.exec()
-            
-            if cb.isChecked():
-                self.confirm_delete = False
-            
-            if response == QMessageBox.No:
-                return
-        
-        track_index = layout_index - 1
-        print(f"Deleting Track Index: {track_index}")
 
-        self.audio.remove_track(track_index)
-        
-        item_right = self.right_layout.itemAt(track_index)
-        widget_lane = item_right.widget()
-        
-        if widget_lane in self.lanes:
-            self.lanes.remove(widget_lane)
-            
-        self.left_layout.takeAt(layout_index).widget().deleteLater()
-        self.right_layout.takeAt(track_index).widget().deleteLater()
-        
-        self.update_global_duration()
-
-    def handle_mute(self):
-        sender = self.sender()
-        idx = self.left_layout.indexOf(sender) - 1 
-        self.audio.toggle_mute(idx)
-        
-    def handle_solo(self):
-        sender = self.sender()
-        idx = self.left_layout.indexOf(sender) - 1
-        self.audio.toggle_solo(idx)
-        self.ui_timer.start()
-
-    def on_clip_moved(self, clip_index, new_start_time):
-        sender_lane = self.sender()
-        if sender_lane in self.lanes:
-            track_index = self.lanes.index(sender_lane)
-            self.audio.set_track_start_time(track_index, new_start_time)
-            self.update_global_duration()
 
     def toggle_playback(self):
         if self.audio.is_playing:
             self.pause_playback()
         else:
             self.audio.start_playback()
-            self.btn_play.setText("Pause")
+            self.ribbon.set_play_state(True)
             self.ui_timer.start()
+
 
     def pause_playback(self):
         self.audio.pause_playback()
-        self.btn_play.setText("Play")
+        self.ribbon.set_play_state(False)
         self.ui_timer.stop()
+
 
     def stop_playback(self):
         self.audio.stop_playback()
-        self.btn_play.setText("Play")
+        self.ribbon.set_play_state(False)
         self.ui_timer.stop()
+
         self.update_playhead_visuals(0)
         self.right_scroll.horizontalScrollBar().setValue(0)
 
@@ -357,8 +259,50 @@ class MainWindow(QMainWindow):
 
     def update_playhead_visuals(self, x):
         self.timeline.set_playhead(x)
-        for lane in self.lanes:
-            lane.set_playhead(x)
+        self.track_manager.update_playhead_visuals(x)
             
         if x > self.right_scroll.horizontalScrollBar().value() + self.right_scroll.viewport().width() - 50:
              self.right_scroll.horizontalScrollBar().setValue(x - 50)
+
+    def handle_timeline_zoom(self, delta, global_pos):
+        self.perform_zoom(delta, global_pos)
+
+    def perform_zoom(self, delta, global_pos):
+        # Map global pos to viewport
+        viewport_pos = self.right_scroll.viewport().mapFromGlobal(global_pos.toPoint())
+        mouse_x_screen = viewport_pos.x()
+        
+        current_scroll = self.right_scroll.horizontalScrollBar().value()
+        current_zoom = self.timeline.pixels_per_second
+        
+        # Calculate time under mouse
+        absolute_x = current_scroll + mouse_x_screen
+        time_under_mouse = absolute_x / current_zoom
+        
+        # Calculate new zoom
+        if delta > 0:
+            new_zoom = current_zoom * 1.1
+        else:
+            new_zoom = current_zoom / 1.1
+        
+        new_zoom = max(1.0, min(1000.0, new_zoom))
+        
+        if new_zoom == current_zoom: return
+
+        # Apply new zoom
+        self.timeline.set_zoom(new_zoom)
+        self.update_zoom(new_zoom)
+        
+        # Calculate new scroll to keep time_under_mouse at mouse_x_screen
+        new_absolute_x = time_under_mouse * new_zoom
+        new_scroll = int(new_absolute_x - mouse_x_screen)
+        
+        self.right_scroll.horizontalScrollBar().setValue(new_scroll)
+
+    def wheelEvent(self, event):
+        if event.modifiers() & Qt.ControlModifier:
+            delta = event.angleDelta().y()
+            self.perform_zoom(delta, event.globalPosition())
+            event.accept()
+        else:
+            super().wheelEvent(event)

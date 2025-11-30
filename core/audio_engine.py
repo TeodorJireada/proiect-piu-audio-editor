@@ -21,9 +21,7 @@ class AudioEngine(QObject):
         if 0 <= index < len(self.tracks):
             del self.tracks[index]
 
-    def set_track_start_time(self, index, time_sec):
-        if 0 <= index < len(self.tracks):
-            self.tracks[index].start_sample = int(time_sec * self.sample_rate)
+    # set_track_start_time removed - use clip.start_time instead
 
     def toggle_mute(self, index):
         if 0 <= index < len(self.tracks): 
@@ -71,18 +69,47 @@ class AudioEngine(QObject):
             else:
                 if track.is_muted: continue
 
-            track_data = track.data
-            start_s = track.start_sample
-            
-            track_pos = self.playhead - start_s
-            
-            if track_pos + frames > 0 and track_pos < len(track_data):
-                offset_in_track = max(0, track_pos)
-                offset_in_buffer = max(0, -track_pos)
-                chunk_len = min(len(track_data) - offset_in_track, frames - offset_in_buffer)
+            # Iterate over all clips in the track
+            for clip in track.clips:
+                # Calculate clip's position relative to playhead
+                # Clip starts at clip.start_time (seconds)
+                # Playhead is at self.playhead (samples) -> self.playhead / sample_rate (seconds)
                 
-                mix_buffer[offset_in_buffer : offset_in_buffer + chunk_len] += \
-                    track_data[offset_in_track : offset_in_track + chunk_len]
+                clip_start_sample = int(clip.start_time * self.sample_rate)
+                clip_end_sample = clip_start_sample + int(clip.duration * self.sample_rate)
+                
+                # Check intersection with current buffer window
+                # Buffer window: [self.playhead, self.playhead + frames]
+                
+                buffer_start = self.playhead
+                buffer_end = self.playhead + frames
+                
+                # Intersection range in global samples
+                start_overlap = max(clip_start_sample, buffer_start)
+                end_overlap = min(clip_end_sample, buffer_end)
+                
+                if start_overlap < end_overlap:
+                    # We have an overlap
+                    overlap_len = end_overlap - start_overlap
+                    
+                    # Calculate offsets
+                    buffer_offset = start_overlap - buffer_start
+                    
+                    # Clip offset: how far into the clip are we?
+                    # Global sample 'start_overlap' corresponds to:
+                    # (start_overlap - clip_start_sample) samples from the *visible* start of the clip.
+                    # But the visible start corresponds to 'clip.start_offset' in the source data.
+                    
+                    offset_in_visible_clip = start_overlap - clip_start_sample
+                    offset_in_source_data = int(clip.start_offset * self.sample_rate) + offset_in_visible_clip
+                    
+                    # Ensure we don't read past source data end (safety check)
+                    source_len = len(clip.data)
+                    if offset_in_source_data < source_len:
+                        read_len = min(overlap_len, source_len - offset_in_source_data)
+                        
+                        mix_buffer[buffer_offset : buffer_offset + read_len] += \
+                            clip.data[offset_in_source_data : offset_in_source_data + read_len]
                 
         outdata[:] = mix_buffer
         self.playhead += frames
