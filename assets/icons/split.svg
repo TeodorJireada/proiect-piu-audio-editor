@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" height="24" viewBox="0 0 24 24" width="24" fill="#e0e0e0">
+  <path d="M0 0h24v24H0z" fill="none"/>
+  <!-- Center Line -->
+  <rect x="11" y="2" width="2" height="20" rx="1" fill="#55aaFF"/> 
+  <!-- Left Bracket -->
+  <path d="M9 18H5c-1.1 0-2-.9-2-2V8c0-1.1.9-2 2-2h4" stroke="#e0e0e0" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+  <!-- Right Bracket -->
+  <path d="M15 18h4c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-4" stroke="#e0e0e0" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+</svg>

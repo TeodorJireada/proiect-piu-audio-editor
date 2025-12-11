@@ -16,7 +16,7 @@ class TrackLane(QFrame):
         self.setMinimumWidth(3000)
         self.clips = [] 
         self.playhead_x = 0
-        self.pixels_per_second = 50
+        self.pixels_per_second = 10
         self.duration = 60
         self.is_placeholder = False
         

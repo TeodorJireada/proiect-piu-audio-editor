@@ -1,11 +1,10 @@
 import os
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, 
                                QHBoxLayout, QPushButton, QScrollArea, QSplitter, 
-                               QFrame, QFileDialog, QMessageBox, QCheckBox, QSizePolicy)
+                               QFrame, QFileDialog, QMessageBox, QCheckBox, QSizePolicy, QApplication)
 from PySide6.QtGui import QShortcut, QKeySequence
 from PySide6.QtCore import Qt, QTimer
 
-from styles import DARK_THEME
 from core.audio_engine import AudioEngine
 from core.track_loader import TrackLoader
 from ui.widgets.timeline import TimelineRuler
@@ -16,6 +15,7 @@ from ui.widgets.ribbon import Ribbon
 from ui.track_manager import TrackManager
 from core.command_stack import UndoStack
 from core.project_manager import ProjectManager
+from ui.theme_manager import ThemeManager
 from PySide6.QtGui import QAction
 
 class MainWindow(QMainWindow):
@@ -23,7 +23,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Python Qt DAW - Audio Engine Active")
         self.resize(1200, 800)
-        self.setStyleSheet(DARK_THEME)
+        # self.setStyleSheet(DARK_THEME) # Handled by ThemeManager
 
         # AUDIO ENGINE
         self.audio = AudioEngine() 
@@ -71,12 +71,23 @@ class MainWindow(QMainWindow):
         self.shortcut_redo_alt.activated.connect(self.redo_action)
         self.shortcut_redo_alt.setContext(Qt.WindowShortcut)
 
+        # Save (Ctrl+S)
+        self.shortcut_save = QShortcut(QKeySequence("Ctrl+S"), self)
+        self.shortcut_save.activated.connect(self.on_save_project)
+        self.shortcut_save.setContext(Qt.WindowShortcut)
+
+        # Save As (Ctrl+Shift+S)
+        self.shortcut_save_as = QShortcut(QKeySequence("Ctrl+Shift+S"), self)
+        self.shortcut_save_as.activated.connect(self.on_save_project_as)
+        self.shortcut_save_as.setContext(Qt.WindowShortcut)
+
     def setup_ribbon(self):
         self.ribbon = Ribbon()
         self.ribbon.play_clicked.connect(self.toggle_playback)
         self.ribbon.stop_clicked.connect(self.stop_playback)
         self.ribbon.undo_clicked.connect(self.undo_action)
         self.ribbon.redo_clicked.connect(self.redo_action)
+        self.ribbon.save_clicked.connect(self.on_save_project)
         self.ribbon.tool_changed.connect(self.on_tool_changed)
         self.main_layout.addWidget(self.ribbon)
 
@@ -252,14 +263,6 @@ class MainWindow(QMainWindow):
     def user_seek(self, x_pixels):
         # Convert pixels to time using current zoom
         time_sec = x_pixels / self.timeline.pixels_per_second
-        # Audio engine expects pixels at di100px/s ? No, let's check auo engine.
-        # The previous code was: self.audio.set_playhead(x_pixels, px_per_second=100)
-        # So audio engine handles time conversion if we pass px_per_second.
-        # But wait, set_playhead in audio_engine might just take time?
-        # Let's assume we should pass the new pixels_per_second or just calculate time here.
-        # Actually, looking at user_seek signature in previous file content:
-        # self.audio.set_playhead(x_pixels, px_per_second=100)
-        # So I should update this call.
         
         self.audio.set_playhead(x_pixels, px_per_second=self.timeline.pixels_per_second)
         self.update_playhead_visuals(x_pixels)
@@ -400,6 +403,24 @@ class MainWindow(QMainWindow):
         action_export = QAction("Export Audio (WAV)", self)
         action_export.triggered.connect(self.on_export_audio)
         file_menu.addAction(action_export)
+
+        # View Menu
+        view_menu = menu_bar.addMenu("View")
+        
+        theme_menu = view_menu.addMenu("Theme")
+        
+        action_theme_dark = QAction("Dark", self)
+        action_theme_dark.triggered.connect(lambda: self.switch_theme("dark"))
+        theme_menu.addAction(action_theme_dark)
+        
+        action_theme_hc = QAction("High Contrast", self)
+        action_theme_hc.triggered.connect(lambda: self.switch_theme("high_contrast"))
+        theme_menu.addAction(action_theme_hc)
+
+    def switch_theme(self, theme_name):
+        app = QApplication.instance()
+        ThemeManager.save_theme(theme_name)
+        ThemeManager.apply_theme(app, theme_name)
 
     def on_save_project(self):
         if self.current_project_path:

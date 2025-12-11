@@ -1,0 +1,100 @@
+
+QMainWindow { background-color: #000000; }
+QWidget { color: #ffffff; font-family: 'Segoe UI', sans-serif; font-size: 14px; font-weight: bold; }
+
+/* Strong Borders for Contrast */
+QFrame { border: 2px solid #ffffff; }
+
+/* Ribbon */
+QFrame#Ribbon { background-color: #000000; border-bottom: 2px solid #ffffff; }
+
+/* Buttons */
+QPushButton { 
+    background-color: #000000; 
+    color: #ffffff;
+    border: 2px solid #ffffff; 
+    border-radius: 0px; 
+    padding: 8px; 
+}
+QPushButton:hover { background-color: #00ffff; color: #000000; }
+QPushButton:pressed { background-color: #ffffff; color: #000000; }
+
+/* Transport Buttons (Icons Only) - High Contrast */
+/* We keep borders here for accessibility/visibility */
+QPushButton#TransportButton {
+    background-color: transparent;
+    border: 2px solid white;
+    padding: 2px;
+}
+QPushButton#TransportButton:hover {
+    background-color: #00ffff;
+    border-color: #00ffff;
+}
+QPushButton#TransportButton:pressed {
+    background-color: #ffffff;
+    border-color: #ffffff;
+}
+
+/* Tool Buttons (Icons Only, Checkable) - High Contrast */
+QPushButton#ToolButton {
+    background-color: transparent;
+    border: 2px solid white;
+    padding: 2px;
+}
+QPushButton#ToolButton:hover {
+    background-color: #00ffff;
+    border-color: #00ffff;
+}
+QPushButton#ToolButton:checked {
+    background-color: #ffff00; /* Yellow for selection */
+    color: black;
+    border: 3px solid #ffff00;
+}
+
+/* Scroll Areas */
+QScrollArea { border: 2px solid #ffffff; background-color: #000000; }
+QScrollBar:vertical { background: #000000; width: 16px; border-left: 1px solid #ffffff; }
+QScrollBar::handle:vertical { background: #ffffff; border: 2px solid #000000; }
+
+/* Tracks */
+QFrame#TrackHeader { background-color: #000000; border-bottom: 2px solid #ffffff; border-right: 2px solid #ffffff; }
+QFrame#TrackLane { background-color: #000000; border-bottom: 2px solid #ffffff; }
+QWidget#TrackContainer { background-color: #000000; }
+
+/* Splitter */
+QSplitter::handle { background-color: #ffffff; height: 4px; }
+
+/* Top Left Corner */
+QFrame#TopLeftCorner { background-color: #000000; border: 2px solid #ffffff; }
+
+/* Add Track Button */
+QPushButton#AddTrackButton {
+    background-color: #000000;
+    color: #ffffff;
+    border: 3px double #ffffff;
+    font-size: 24px;
+    font-weight: bold;
+}
+QPushButton#AddTrackButton:hover {
+    background-color: #ffff00;
+    color: #000000;
+}
+
+/* Track Header Components */
+QLabel#TrackNameLabel { font-weight: bold; font-size: 14px; color: #ffffff; }
+
+QPushButton#TrackDeleteButton { background-color: #000000; color: #ffffff; border: 2px solid #ffffff; }
+QPushButton#TrackDeleteButton:hover { background-color: #ff0000; color: #ffffff; }
+
+/* Mute/Solo State Styles - High Contrast */
+QPushButton[muted="true"] { background-color: #ff0000; color: #ffffff; border: 3px solid #ffffff; }
+QPushButton[muted="false"] { background-color: #000000; color: #ffffff; border: 2px solid #ffffff; }
+
+QPushButton[soloed="true"] { background-color: #00ff00; color: #000000; border: 3px solid #ffffff; }
+QPushButton[soloed="false"] { background-color: #000000; color: #ffffff; border: 2px solid #ffffff; }
+
+/* Menus */
+QMenuBar { background-color: #000000; color: #ffffff; border-bottom: 2px solid #ffffff; }
+QMenuBar::item:selected { background-color: #ffffff; color: #000000; }
+QMenu { background-color: #000000; color: #ffffff; border: 2px solid #ffffff; }
+QMenu::item:selected { background-color: #ffff00; color: #000000; }
