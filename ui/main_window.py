@@ -15,6 +15,8 @@ from ui.widgets.track_container import TrackContainer
 from ui.widgets.ribbon import Ribbon
 from ui.track_manager import TrackManager
 from core.command_stack import UndoStack
+from core.project_manager import ProjectManager
+from PySide6.QtGui import QAction
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -42,6 +44,12 @@ class MainWindow(QMainWindow):
 
         self.setup_ribbon()
         self.setup_workspace()
+        self.setup_menu()
+        
+        self.project_manager = ProjectManager()
+        self.current_project_path = None
+        self.clean_command = None
+        self.undo_stack.stack_changed.connect(self.update_dirty_state)
 
         self.confirm_delete = True
         
@@ -69,7 +77,11 @@ class MainWindow(QMainWindow):
         self.ribbon.stop_clicked.connect(self.stop_playback)
         self.ribbon.undo_clicked.connect(self.undo_action)
         self.ribbon.redo_clicked.connect(self.redo_action)
+        self.ribbon.tool_changed.connect(self.on_tool_changed)
         self.main_layout.addWidget(self.ribbon)
+
+    def on_tool_changed(self, tool_name):
+        self.track_manager.set_active_tool(tool_name)
 
     def setup_workspace(self):
         splitter = QSplitter(Qt.Horizontal)
@@ -162,6 +174,11 @@ class MainWindow(QMainWindow):
             self.btn_add_track,
             self.right_container
         )
+        
+        # Connect Loading Signals
+        self.track_manager.loading_started.connect(lambda: self.ribbon.show_loading("Loading Project..."))
+        self.track_manager.loading_progress.connect(self.ribbon.update_loading)
+        self.track_manager.loading_finished.connect(self.ribbon.hide_loading)
 
 
     def sync_scrollbars(self):
@@ -306,3 +323,148 @@ class MainWindow(QMainWindow):
             event.accept()
         else:
             super().wheelEvent(event)
+
+    def update_dirty_state(self):
+        is_dirty = self.undo_stack.current_command != self.clean_command
+        
+        title = "Python Qt DAW"
+        if self.current_project_path:
+            title += f" - {os.path.basename(self.current_project_path)}"
+        else:
+            title += " - Untitled"
+            
+        if is_dirty:
+            title = "* " + title
+            
+        self.setWindowTitle(title)
+
+    def check_save_changes(self):
+        is_dirty = self.undo_stack.current_command != self.clean_command
+        if not is_dirty:
+            return True
+            
+        reply = QMessageBox.question(
+            self, 
+            "Unsaved Changes", 
+            "You have unsaved changes. Do you want to save them?",
+            QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel
+        )
+        
+        if reply == QMessageBox.Save:
+            self.on_save_project()
+            # Check if save was successful (clean command updated)
+            return self.undo_stack.current_command == self.clean_command
+        elif reply == QMessageBox.Discard:
+            return True
+        else:
+            return False
+
+    def on_new_project(self):
+        if not self.check_save_changes():
+            return
+            
+        self.track_manager.clear_all_tracks()
+        self.undo_stack.clear()
+        self.current_project_path = None
+        self.clean_command = None
+        self.update_dirty_state()
+
+    def closeEvent(self, event):
+        if self.check_save_changes():
+            event.accept()
+        else:
+            event.ignore()
+
+    def setup_menu(self):
+        menu_bar = self.menuBar()
+        file_menu = menu_bar.addMenu("File")
+        
+        action_new = QAction("New Project", self)
+        action_new.triggered.connect(self.on_new_project)
+        file_menu.addAction(action_new)
+
+        action_open = QAction("Open Project", self)
+        action_open.triggered.connect(self.on_open_project)
+        file_menu.addAction(action_open)
+        
+        action_save = QAction("Save Project", self)
+        action_save.triggered.connect(self.on_save_project)
+        file_menu.addAction(action_save)
+
+        action_save_as = QAction("Save Project As...", self)
+        action_save_as.triggered.connect(self.on_save_project_as)
+        file_menu.addAction(action_save_as)
+        
+        file_menu.addSeparator()
+        
+        action_export = QAction("Export Audio (WAV)", self)
+        action_export.triggered.connect(self.on_export_audio)
+        file_menu.addAction(action_export)
+
+    def on_save_project(self):
+        if self.current_project_path:
+            success = self.project_manager.save_project(self.current_project_path, self.audio)
+            if success:
+                self.ribbon.show_loading(f"Saved to {os.path.basename(self.current_project_path)}")
+                QTimer.singleShot(2000, self.ribbon.hide_loading)
+                self.clean_command = self.undo_stack.current_command
+                self.update_dirty_state()
+            else:
+                QMessageBox.critical(self, "Error", "Failed to save project.")
+        else:
+            self.on_save_project_as()
+
+    def on_save_project_as(self):
+        file_path, _ = QFileDialog.getSaveFileName(self, "Save Project As", "", "Project Files (*.json)")
+        if file_path:
+            if not file_path.endswith(".json"):
+                file_path += ".json"
+            
+            self.current_project_path = file_path
+            success = self.project_manager.save_project(file_path, self.audio)
+            
+            if success:
+                self.setWindowTitle(f"Python Qt DAW - {os.path.basename(file_path)}")
+                QMessageBox.information(self, "Success", f"Project saved to {file_path}")
+                self.clean_command = self.undo_stack.current_command
+                self.update_dirty_state()
+            else:
+                QMessageBox.critical(self, "Error", "Failed to save project.")
+
+    def on_open_project(self):
+        if not self.check_save_changes():
+            return
+
+        file_path, _ = QFileDialog.getOpenFileName(self, "Open Project", "", "Project Files (*.json)")
+        if file_path:
+            # Use TrackManager's async loader
+            self.track_manager.load_project(file_path)
+            self.current_project_path = file_path
+            self.undo_stack.clear()
+            self.clean_command = None
+            self.update_dirty_state()
+
+    def on_export_audio(self):
+        file_path, _ = QFileDialog.getSaveFileName(self, "Export Audio", "", "WAV Files (*.wav)")
+        if file_path:
+            if not file_path.endswith(".wav"):
+                file_path += ".wav"
+            
+            # Determine duration
+            duration = self.timeline.duration
+            
+            max_end = 0
+            for track in self.audio.tracks:
+                for clip in track.clips:
+                    end = clip.start_time + clip.duration
+                    if end > max_end: max_end = end
+            
+            if max_end == 0:
+                QMessageBox.warning(self, "Warning", "Project is empty.")
+                return
+
+            # Add a small tail (e.g. 1 second)
+            export_duration = max_end + 1.0
+            
+            self.audio.export_audio(file_path, export_duration)
+            QMessageBox.information(self, "Success", f"Audio exported to {file_path}")

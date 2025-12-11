@@ -81,3 +81,6 @@ class TrackHeader(QFrame):
         self.btn_solo.setProperty("soloed", self.is_soloed)
         self.btn_solo.style().unpolish(self.btn_solo)
         self.btn_solo.style().polish(self.btn_solo)
+
+    def set_title(self, title):
+        self.lbl_name.setText(title)

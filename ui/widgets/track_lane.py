@@ -3,13 +3,12 @@ from PySide6.QtGui import QColor, QPainter, QPen, QBrush
 from PySide6.QtWidgets import QFrame
 
 class TrackLane(QFrame):
-    clip_moved = Signal(int, float, float) # clip_index, old_start_time, new_start_time
+    clip_moved = Signal(int, float, float) 
     clip_trimmed = Signal(int, float, float, float, float, float, float) 
-    clip_split = Signal(int, float) # clip_index, split_time 
-    clip_duplicated = Signal(int, float) # clip_index, new_start_time 
-    clip_deleted = Signal(int) # clip_index 
-    # clip_index, old_start, old_dur, old_offset, new_start, new_dur, new_offset
-
+    clip_split = Signal(int, float) 
+    clip_duplicated = Signal(int, float) 
+    clip_deleted = Signal(int) 
+    
     def __init__(self):
         super().__init__()
         self.setObjectName("TrackLane")
@@ -17,20 +16,26 @@ class TrackLane(QFrame):
         self.setMinimumWidth(3000)
         self.clips = [] 
         self.playhead_x = 0
-        self.pixels_per_second = 100
+        self.pixels_per_second = 50
         self.duration = 60
         self.is_placeholder = False
         
         # Dragging State
         self.dragging_clip_index = -1
-        self.drag_mode = None # "MOVE", "TRIM_LEFT", "TRIM_RIGHT"
+        self.drag_mode = None 
         self.drag_start_x = 0
         self.clip_initial_start_time = 0.0
         self.clip_initial_duration = 0.0
         self.clip_initial_offset = 0.0
         
         self.HANDLE_WIDTH = 10
+        self.HANDLE_WIDTH = 10
         self.setMouseTracking(True)
+        self.active_tool = "MOVE"
+
+    def set_tool(self, tool_name):
+        self.active_tool = tool_name
+        self.update()
 
     def set_zoom(self, px_per_sec):
         self.pixels_per_second = px_per_sec
@@ -91,6 +96,17 @@ class TrackLane(QFrame):
                 end_x = start_x + width
                 
                 if start_x <= click_x <= end_x:
+                    if self.active_tool == "SPLIT":
+                        self.handle_split(i, click_x)
+                        return
+                    elif self.active_tool == "DUPLICATE":
+                        self.handle_duplicate(i)
+                        return
+                    elif self.active_tool == "DELETE":
+                        self.handle_delete(i)
+                        return
+                    
+                    # MOVE TOOL LOGIC
                     self.dragging_clip_index = i
                     self.drag_start_x = click_x
                     self.clip_initial_start_time = clip['start_time']
@@ -121,9 +137,6 @@ class TrackLane(QFrame):
                 clip['start_time'] = new_start_time
                 
             elif self.drag_mode == "TRIM_LEFT":
-                # Moving left edge: changes start_time, duration, and start_offset
-                # Limit: cannot trim past end (duration > 0)
-                # Limit: cannot trim before source start (offset >= 0)
                 
                 new_start_time = self.clip_initial_start_time + delta_time
                 
@@ -131,10 +144,6 @@ class TrackLane(QFrame):
                 if new_start_time < 0: new_start_time = 0
                 
                 # Calculate new offset
-                # If we moved right (positive delta), offset increases
-                # If we moved left (negative delta), offset decreases
-                # new_offset = initial_offset + (new_start - initial_start)
-                
                 new_offset = self.clip_initial_offset + (new_start_time - self.clip_initial_start_time)
                 
                 if new_offset < 0:
@@ -142,7 +151,6 @@ class TrackLane(QFrame):
                     new_start_time = self.clip_initial_start_time - self.clip_initial_offset
                 
                 # Calculate new duration
-                # End time should remain constant: initial_start + initial_dur
                 end_time = self.clip_initial_start_time + self.clip_initial_duration
                 new_duration = end_time - new_start_time
                 
@@ -156,16 +164,8 @@ class TrackLane(QFrame):
                 clip['start_offset'] = new_offset
 
             elif self.drag_mode == "TRIM_RIGHT":
-                # Moving right edge: changes duration only
                 new_duration = self.clip_initial_duration + delta_time
                 if new_duration < 0.1: new_duration = 0.1
-                
-                # Limit: cannot trim past source length?
-                # We don't have source length here easily available unless we store it.
-                # But for now let's just allow extending? No, that would show silence/crash.
-                # We should limit it. But TrackLane doesn't know source length.
-                # We can assume waveform length is a proxy?
-                # For now, let's just allow it and let AudioEngine handle silence if out of bounds.
                 
                 clip['duration'] = new_duration
 
@@ -175,19 +175,28 @@ class TrackLane(QFrame):
             # Hover Logic
             hover_cursor = Qt.ArrowCursor
             
-            for clip in self.clips:
-                start_x = int(clip['start_time'] * self.pixels_per_second)
-                width = int(clip['duration'] * self.pixels_per_second)
-                end_x = start_x + width
-                
-                if start_x <= current_x <= end_x:
-                    if current_x < start_x + self.HANDLE_WIDTH:
-                        hover_cursor = Qt.SizeHorCursor
-                    elif current_x > end_x - self.HANDLE_WIDTH:
-                        hover_cursor = Qt.SizeHorCursor
-                    else:
-                        hover_cursor = Qt.ArrowCursor # Or SizeAllCursor for move
-                    break
+            if self.active_tool == "SPLIT":
+                hover_cursor = Qt.CrossCursor
+            elif self.active_tool == "DUPLICATE":
+                hover_cursor = Qt.DragCopyCursor
+            elif self.active_tool == "DELETE":
+                hover_cursor = Qt.ForbiddenCursor
+            
+            # Only check handles if MOVE tool
+            if self.active_tool == "MOVE":
+                for clip in self.clips:
+                    start_x = int(clip['start_time'] * self.pixels_per_second)
+                    width = int(clip['duration'] * self.pixels_per_second)
+                    end_x = start_x + width
+                    
+                    if start_x <= current_x <= end_x:
+                        if current_x < start_x + self.HANDLE_WIDTH:
+                            hover_cursor = Qt.SizeHorCursor
+                        elif current_x > end_x - self.HANDLE_WIDTH:
+                            hover_cursor = Qt.SizeHorCursor
+                        else:
+                            hover_cursor = Qt.ArrowCursor 
+                        break
             
             self.setCursor(hover_cursor)
 

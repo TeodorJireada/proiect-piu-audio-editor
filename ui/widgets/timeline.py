@@ -11,7 +11,7 @@ class TimelineRuler(QWidget):
         self.setFixedHeight(30)
         self.setMinimumWidth(3000)
         self.playhead_x = 0
-        self.pixels_per_second = 100
+        self.pixels_per_second = 10
         self.duration = 60
 
     def set_playhead(self, x):

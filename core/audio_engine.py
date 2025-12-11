@@ -57,9 +57,15 @@ class AudioEngine(QObject):
 
     # MIXING ENGINE 
     
-    def audio_callback(self, outdata, frames, time, status):
-        if status: print(status)
-        mix_buffer = np.zeros((frames, 2), dtype='float32')
+    def set_playhead(self, pixel_x, px_per_second=100):
+        seconds = pixel_x / px_per_second
+        self.playhead = int(seconds * self.sample_rate)
+
+    def get_playhead_time(self):
+        return self.playhead / self.sample_rate
+
+    def mix_chunk(self, start_sample, num_frames):
+        mix_buffer = np.zeros((num_frames, 2), dtype='float32')
         
         any_solo = any(t.is_soloed for t in self.tracks)
 
@@ -69,48 +75,53 @@ class AudioEngine(QObject):
             else:
                 if track.is_muted: continue
 
-            # Iterate over all clips in the track
             for clip in track.clips:
-                # Calculate clip's position relative to playhead
-                # Clip starts at clip.start_time (seconds)
-                # Playhead is at self.playhead (samples) -> self.playhead / sample_rate (seconds)
-                
                 clip_start_sample = int(clip.start_time * self.sample_rate)
                 clip_end_sample = clip_start_sample + int(clip.duration * self.sample_rate)
                 
-                # Check intersection with current buffer window
-                # Buffer window: [self.playhead, self.playhead + frames]
+                buffer_start = start_sample
+                buffer_end = start_sample + num_frames
                 
-                buffer_start = self.playhead
-                buffer_end = self.playhead + frames
-                
-                # Intersection range in global samples
                 start_overlap = max(clip_start_sample, buffer_start)
                 end_overlap = min(clip_end_sample, buffer_end)
                 
                 if start_overlap < end_overlap:
-                    # We have an overlap
                     overlap_len = end_overlap - start_overlap
-                    
-                    # Calculate offsets
                     buffer_offset = start_overlap - buffer_start
-                    
-                    # Clip offset: how far into the clip are we?
-                    # Global sample 'start_overlap' corresponds to:
-                    # (start_overlap - clip_start_sample) samples from the *visible* start of the clip.
-                    # But the visible start corresponds to 'clip.start_offset' in the source data.
                     
                     offset_in_visible_clip = start_overlap - clip_start_sample
                     offset_in_source_data = int(clip.start_offset * self.sample_rate) + offset_in_visible_clip
                     
-                    # Ensure we don't read past source data end (safety check)
                     source_len = len(clip.data)
                     if offset_in_source_data < source_len:
                         read_len = min(overlap_len, source_len - offset_in_source_data)
                         
                         mix_buffer[buffer_offset : buffer_offset + read_len] += \
                             clip.data[offset_in_source_data : offset_in_source_data + read_len]
-                
+        
+        return mix_buffer
+
+    def export_audio(self, file_path, duration_sec):
+        import soundfile as sf
+        
+        total_samples = int(duration_sec * self.sample_rate)
+        block_size = 4096
+        
+        print(f"Exporting to {file_path} ({duration_sec}s)")
+        
+        with sf.SoundFile(file_path, mode='w', samplerate=self.sample_rate, channels=2, subtype='PCM_16') as file:
+            for start in range(0, total_samples, block_size):
+                frames = min(block_size, total_samples - start)
+                mix = self.mix_chunk(start, frames)
+                file.write(mix)
+        
+        print("Export complete.")
+
+    def audio_callback(self, outdata, frames, time, status):
+        if status: print(status)
+        
+        mix_buffer = self.mix_chunk(self.playhead, frames)
+        
         outdata[:] = mix_buffer
         self.playhead += frames
 

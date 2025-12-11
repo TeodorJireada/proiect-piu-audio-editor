@@ -1,5 +1,5 @@
 import os
-from PySide6.QtCore import QObject, Slot
+from PySide6.QtCore import QObject, Slot, Signal
 from PySide6.QtWidgets import QFileDialog, QMessageBox, QCheckBox
 
 from ui.widgets.track_header import TrackHeader
@@ -10,6 +10,10 @@ from core.commands import AddTrackCommand, DeleteTrackCommand, MoveClipCommand, 
 from core.models import AudioClip
 
 class TrackManager(QObject):
+    loading_started = Signal()
+    loading_progress = Signal(int, int) # current, total
+    loading_finished = Signal()
+
     def __init__(self, main_window, audio_engine, undo_stack, timeline, left_layout, right_layout, btn_add_track, track_container):
         super().__init__()
         self.main_window = main_window
@@ -23,7 +27,15 @@ class TrackManager(QObject):
         
         self.lanes = []
         self.confirm_delete = True
-        self.loader_thread = None
+        self.active_loaders = []
+        self.pending_tracks = []
+        self.loaded_count = 0
+        self.current_tool = "MOVE"
+
+    def set_active_tool(self, tool_name):
+        self.current_tool = tool_name
+        for lane in self.lanes:
+            lane.set_tool(tool_name)
 
     def import_track(self):
         file_path, _ = QFileDialog.getOpenFileName(self.main_window, "Import Audio", "", "Audio Files (*.wav *.mp3 *.ogg *.flac *.opus)")
@@ -51,16 +63,10 @@ class TrackManager(QObject):
         # Create initial clip
         duration_sec = len(track_data.source_data) / track_data.sample_rate
         
-        # If track_data was restored from Undo, it might already have clips?
-        # Our current Undo implementation stores the whole track_data object.
-        # If we delete a track, we save the track_data.
-        # If we add it back, we reuse track_data.
-        # So if it already has clips, we should respect them.
-        
         if not track_data.clips:
             initial_clip = AudioClip(
                 data=track_data.source_data,
-                start_time=0.0, # Will be updated if we insert at specific time? No, usually 0.
+                start_time=0.0,
                 start_offset=0.0,
                 duration=duration_sec,
                 name=track_data.name,
@@ -85,6 +91,7 @@ class TrackManager(QObject):
         
         # Create Lane with Waveform
         lane = TrackLane()
+        lane.set_tool(self.current_tool)
         lane.set_zoom(self.timeline.pixels_per_second)
         lane.clip_moved.connect(self.on_clip_moved)
         lane.clip_trimmed.connect(self.on_clip_trimmed)
@@ -103,19 +110,11 @@ class TrackManager(QObject):
                 clip.waveform
             )
         
-        self.lanes.insert(index, lane) # Maintain lanes list sync
-
-        # Insert into Layouts
-        # Left Layout: Headers. 
-        # The left_layout has: TopLeftCorner (0), [Headers...], AddButton, Stretch
-        # So headers start at index 1.
+        self.lanes.insert(index, lane)
         
         header_insert_idx = 1 + index
         self.left_layout.insertWidget(header_insert_idx, header)
 
-        # Right Layout: Lanes.
-        # right_layout has: [Lanes...], Stretch
-        # So lanes start at index 0.
         lane_insert_idx = index
         self.right_layout.insertWidget(lane_insert_idx, lane)
         
@@ -149,6 +148,12 @@ class TrackManager(QObject):
         if lane_item: lane_item.widget().deleteLater()
         
         self.update_global_duration()
+
+    def clear_all_tracks(self):
+        # Remove all tracks from last to first
+        for i in range(len(self.audio.tracks) - 1, -1, -1):
+            self.perform_delete_track(i)
+        self.undo_stack.clear()
 
     def delete_track_request(self):
         sender_header = self.sender()
@@ -206,18 +211,10 @@ class TrackManager(QObject):
         if sender_lane in self.lanes:
             track_index = self.lanes.index(sender_lane)
             
-            # We need split_offset (offset in source data)
-            # We can calculate it from the current clip state
             if 0 <= track_index < len(self.audio.tracks):
                 track = self.audio.tracks[track_index]
                 if 0 <= clip_index < len(track.clips):
                     clip = track.clips[clip_index]
-                    
-                    # relative_split = split_time - clip.start_time
-                    # split_offset = clip.start_offset + relative_split
-                    # But we can let the Command or perform_split_clip handle calculation?
-                    # The Command takes split_offset.
-                    # Let's calculate it here.
                     
                     relative_split = split_time - clip.start_time
                     split_offset = clip.start_offset + relative_split
@@ -258,7 +255,7 @@ class TrackManager(QObject):
         if 0 <= lane_index < len(self.lanes):
             lane = self.lanes[lane_index]
             # Update UI
-            lane.update_clip(clip_index, new_start, new_duration) # We need to add this method to TrackLane
+            lane.update_clip(clip_index, new_start, new_duration) 
             
             # Update Audio Engine Data
             if 0 <= lane_index < len(self.audio.tracks):
@@ -345,12 +342,9 @@ class TrackManager(QObject):
                         waveform=original_clip.waveform
                     )
                     
-                    # Insert at end for now, or try to keep sorted?
-                    # If we just append, the index will be len(clips)-1
                     track.clips.append(new_clip)
                     new_index = len(track.clips) - 1
                     
-                    # Update UI
                     self.refresh_lane(lane_index)
                     
                     self.update_global_duration()
@@ -429,3 +423,102 @@ class TrackManager(QObject):
     def update_playhead_visuals(self, x):
         for lane in self.lanes:
             lane.set_playhead(x)
+
+    def load_project(self, file_path):
+        from core.project_manager import ProjectManager
+        import numpy as np
+        from core.models import AudioTrackData
+        
+        pm = ProjectManager()
+        project_data = pm.parse_project_file(file_path)
+        
+        if not project_data:
+            return
+
+        self.clear_all_tracks()
+        
+        tracks_list = project_data.get("tracks", [])
+        total_tracks = len(tracks_list)
+        
+        if total_tracks == 0:
+            return
+
+        self.pending_tracks = [None] * total_tracks
+        self.loaded_count = 0
+        self.loading_started.emit()
+        self.loading_progress.emit(0, total_tracks)
+        
+        for i, track_info in enumerate(tracks_list):
+            file_path = track_info.get("file_path")
+            
+            if not os.path.exists(file_path):
+                print(f"File not found: {file_path}")
+                # Treat as loaded but empty/error
+                self.on_project_track_loaded(None, track_info, i, None)
+                continue
+                
+            loader = TrackLoader(file_path, self.audio.sample_rate)
+            # Pass index 'i' to callback
+            loader.loaded.connect(lambda data, info=track_info, idx=i, l=loader: self.on_project_track_loaded(data, info, idx, l))
+            loader.failed.connect(lambda err, info=track_info, idx=i, l=loader: self.on_project_track_loaded(None, info, idx, l))
+            loader.start()
+            self.active_loaders.append(loader)
+
+    def on_project_track_loaded(self, loaded_track_data, track_info, track_index, loader):
+        if loader and loader in self.active_loaders:
+            self.active_loaders.remove(loader)
+            
+        # Store result
+        self.pending_tracks[track_index] = (loaded_track_data, track_info)
+        self.loaded_count += 1
+        
+        total_tracks = len(self.pending_tracks)
+        self.loading_progress.emit(self.loaded_count, total_tracks)
+        
+        if self.loaded_count == total_tracks:
+            self.finalize_batch_load()
+
+    def finalize_batch_load(self):
+        import numpy as np
+        from core.models import AudioTrackData, AudioClip
+
+        for i, item in enumerate(self.pending_tracks):
+            if item is None: continue
+            
+            loaded_track_data, track_info = item
+            
+            if loaded_track_data is None:
+                # Handle error case
+                dummy_data = np.zeros((1, 2), dtype='float32')
+                track = AudioTrackData(
+                    name=track_info.get("name", "Error Loading"),
+                    file_path=track_info.get("file_path"),
+                    data=dummy_data,
+                    sample_rate=self.audio.sample_rate
+                )
+            else:
+                track = loaded_track_data
+                track.name = track_info.get("name", track.name)
+
+            # Apply saved state
+            track.is_muted = track_info.get("is_muted", False)
+            track.is_soloed = track_info.get("is_soloed", False)
+            
+            # Reconstruct Clips
+            track.clips = []
+            for clip_info in track_info.get("clips", []):
+                clip = AudioClip(
+                    data=track.source_data,
+                    start_time=clip_info.get("start_time", 0),
+                    start_offset=clip_info.get("start_offset", 0),
+                    duration=clip_info.get("duration", 0),
+                    name=clip_info.get("name", "Clip"),
+                    waveform=track.waveform
+                )
+                track.clips.append(clip)
+            
+            self.perform_add_track(track)
+            
+        self.loading_finished.emit()
+        self.pending_tracks = []
+        self.loaded_count = 0

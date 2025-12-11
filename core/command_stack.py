@@ -45,3 +45,14 @@ class UndoStack(QObject):
 
     def can_redo(self):
         return len(self._redo_stack) > 0
+
+    @property
+    def current_command(self):
+        if self._undo_stack:
+            return self._undo_stack[-1]
+        return None
+
+    def clear(self):
+        self._undo_stack.clear()
+        self._redo_stack.clear()
+        self.stack_changed.emit()

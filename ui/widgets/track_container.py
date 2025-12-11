@@ -6,7 +6,7 @@ class TrackContainer(QWidget):
     def __init__(self):
         super().__init__()
         self.setObjectName("TrackContainer")
-        self.pixels_per_second = 100
+        self.pixels_per_second = 50
         self.duration = 60
         self.setMinimumWidth(3000)
 
