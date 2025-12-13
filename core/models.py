@@ -1,9 +1,9 @@
 class AudioClip:
     def __init__(self, data, start_time, start_offset, duration, name, waveform=None):
-        self.data = data # Source numpy array
-        self.start_time = start_time # Global start time in seconds
-        self.start_offset = start_offset # Offset into source data in seconds
-        self.duration = duration # Visible duration in seconds
+        self.data = data 
+        self.start_time = start_time 
+        self.start_offset = start_offset 
+        self.duration = duration 
         self.name = name
         self.waveform = waveform
 
@@ -15,5 +15,7 @@ class AudioTrackData:
         self.sample_rate = sample_rate
         self.waveform = None
         self.is_muted = False
+        self.is_muted = False
         self.is_soloed = False
+        self.color = "#4466aa" # Default color
         self.clips = [] # List of AudioClip

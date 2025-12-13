@@ -16,10 +16,6 @@ class ThemeManager:
 
     @staticmethod
     def apply_theme(app, theme_name=None):
-        """
-        Applies consistency styles (Fusion) and loads the requested theme QSS and Palette.
-        If theme_name is None, loads from settings.
-        """
         if theme_name is None:
             theme_name = ThemeManager.get_saved_theme()
             

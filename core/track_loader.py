@@ -34,9 +34,8 @@ class TrackLoader(QThread):
                     data = np.column_stack((left, right))
 
             # Generate Waveform for UI
-            # We want ~100 pixels per second of audio
             step = int(self.target_sr / 100)
-            if step < 1: step = 1 # Safety check for very short sounds
+            if step < 1: step = 1       # Safety check for very short sounds
             
             # Convert to Mono & Absolute value for visualization
             mono_abs = np.mean(np.abs(data), axis=1)

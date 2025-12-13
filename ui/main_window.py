@@ -301,9 +301,9 @@ class MainWindow(QMainWindow):
         
         # Calculate new zoom
         if delta > 0:
-            new_zoom = current_zoom * 1.1
+            new_zoom = current_zoom * 1.5
         else:
-            new_zoom = current_zoom / 1.1
+            new_zoom = current_zoom / 1.5
         
         new_zoom = max(1.0, min(1000.0, new_zoom))
         

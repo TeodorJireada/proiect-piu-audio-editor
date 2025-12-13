@@ -1,10 +1,63 @@
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QFrame, QLabel, QPushButton, QHBoxLayout, QGridLayout, QWidget, QSizePolicy
+from PySide6.QtWidgets import QFrame, QLabel, QPushButton, QHBoxLayout, QGridLayout, QWidget, QSizePolicy, QMenu
+from PySide6.QtGui import QAction, QColor
+
+class ColorStrip(QFrame):
+    clicked = Signal()
+    color_selected = Signal(str)
+
+    def __init__(self, color_hex):
+        super().__init__()
+        self.setFixedWidth(8) # Slightly wider for better clickability
+        self.setCursor(Qt.PointingHandCursor)
+        self.current_color = color_hex
+        self.update_color(color_hex)
+        
+    def update_color(self, color_hex):
+        self.current_color = color_hex
+        self.setStyleSheet(f"background-color: {color_hex}; border: none;")
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.show_color_menu(event.globalPos())
+            self.clicked.emit()
+
+    def show_color_menu(self, pos):
+        menu = QMenu(self)
+        
+        # Consistent Palette
+        colors = {
+            "Blue": "#4466aa",
+            "Red": "#aa4444",
+            "Green": "#44aa66",
+            "Orange": "#cc8833",
+            "Purple": "#8844aa",
+            "Teal": "#339999",
+            "Yellow": "#aaaa33",
+            "Gray": "#666666"
+        }
+        
+        for name, hex_code in colors.items():
+            action = QAction(name, self)
+            # Create a small pixmap or icon for color? 
+            # For now, just text, maybe color the text or background?
+            # Standard QAction doesn't easily support colored background without styling the whole menu.
+            # We'll just stick to names for simplicity/consistency, user can try them.
+            
+            action.triggered.connect(lambda checked=False, c=hex_code: self.handle_color_selection(c))
+            menu.addAction(action)
+            
+        menu.exec(pos)
+
+    def handle_color_selection(self, color_hex):
+        self.update_color(color_hex)
+        self.color_selected.emit(color_hex)
 
 class TrackHeader(QFrame):
     mute_clicked = Signal()
     solo_clicked = Signal()
     delete_clicked = Signal()
+    color_changed = Signal(str) # New Signal
 
     def __init__(self, name, color_hex):
         super().__init__()
@@ -15,14 +68,24 @@ class TrackHeader(QFrame):
         self.is_muted = False
         self.is_soloed = False
         
-        grid = QGridLayout(self)
-        grid.setContentsMargins(5, 5, 5, 5)
-        grid.setSpacing(5)
+        # Main Layout (Horizontal to put Strip on far left)
+        main_layout = QHBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0) # NO MARGINS for flush fit
+        main_layout.setSpacing(0)
         
         # Color Strip
-        strip = QFrame()
-        strip.setFixedWidth(5)
-        strip.setStyleSheet(f"background-color: {color_hex};")
+        self.color_strip = ColorStrip(color_hex)
+        self.color_strip.color_selected.connect(self.color_changed.emit)
+        main_layout.addWidget(self.color_strip)
+        
+        # Content Container (for the rest of the header)
+        content_widget = QWidget()
+        main_layout.addWidget(content_widget)
+        
+        # Grid for content
+        grid = QGridLayout(content_widget)
+        grid.setContentsMargins(5, 5, 5, 5)
+        grid.setSpacing(5)
         
         # Name Label
         self.lbl_name = QLabel(name)
@@ -55,13 +118,9 @@ class TrackHeader(QFrame):
         
         self.update_styles()
 
-        # Layout widgets
-        grid.addWidget(strip, 0, 0, 2, 1, Qt.AlignLeft)
-        grid.addWidget(self.lbl_name, 0, 1)
-        grid.addWidget(btn_container, 1, 1)
-
-        grid.setColumnStretch(0, 0)
-        grid.setColumnStretch(1, 1)
+        # Layout widgets in Grid
+        grid.addWidget(self.lbl_name, 0, 0)
+        grid.addWidget(btn_container, 1, 0)
 
     def toggle_mute_visual(self):
         self.is_muted = not self.is_muted
@@ -84,3 +143,11 @@ class TrackHeader(QFrame):
 
     def set_title(self, title):
         self.lbl_name.setText(title)
+
+    def set_muted(self, muted):
+        self.is_muted = muted
+        self.update_styles()
+
+    def set_soloed(self, soloed):
+        self.is_soloed = soloed
+        self.update_styles()

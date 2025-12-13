@@ -5,7 +5,7 @@ from PySide6.QtWidgets import QFileDialog, QMessageBox, QCheckBox
 from ui.widgets.track_header import TrackHeader
 from ui.widgets.track_lane import TrackLane
 from core.track_loader import TrackLoader
-from core.commands import AddTrackCommand, DeleteTrackCommand, MoveClipCommand, TrimClipCommand, SplitClipCommand, DuplicateClipCommand, DeleteClipCommand
+from core.commands import AddTrackCommand, DeleteTrackCommand, MoveClipCommand, TrimClipCommand, SplitClipCommand, DuplicateClipCommand, DeleteClipCommand, ChangeColorCommand, ToggleMuteCommand, ToggleSoloCommand
 
 from core.models import AudioClip
 
@@ -84,10 +84,19 @@ class TrackManager(QObject):
         # Create Header
         filename = os.path.basename(track_data.name)
         
-        header = TrackHeader(filename, "#4466aa")
+        # Create Header
+        filename = os.path.basename(track_data.name)
+        
+        # Use saved color or default if not present
+        color = getattr(track_data, "color", "#4466aa")
+        
+        header = TrackHeader(filename, color)
+        header.set_muted(track_data.is_muted)
+        header.set_soloed(track_data.is_soloed)
         header.delete_clicked.connect(self.delete_track_request)
         header.mute_clicked.connect(self.handle_mute)
         header.solo_clicked.connect(self.handle_solo)
+        header.color_changed.connect(self.handle_track_color_change) # Connect new signal
         
         # Create Lane with Waveform
         lane = TrackLane()
@@ -106,8 +115,10 @@ class TrackManager(QObject):
                 clip.start_time, 
                 clip.duration, 
                 clip.start_offset,
-                "#5577cc", 
-                clip.waveform
+                color, 
+                clip.waveform,
+                clip.data,
+                track_data.sample_rate
             )
         
         self.lanes.insert(index, lane)
@@ -169,13 +180,69 @@ class TrackManager(QObject):
     def handle_mute(self):
         sender = self.sender()
         idx = self.left_layout.indexOf(sender) - 1 
-        self.audio.toggle_mute(idx)
+        cmd = ToggleMuteCommand(self, idx)
+        self.undo_stack.push(cmd)
         
     def handle_solo(self):
         sender = self.sender()
         idx = self.left_layout.indexOf(sender) - 1
-        self.audio.toggle_solo(idx)
-        self.main_window.ui_timer.start()
+        cmd = ToggleSoloCommand(self, idx)
+        self.undo_stack.push(cmd)
+
+    def handle_track_color_change(self, new_color):
+        sender_header = self.sender()
+        layout_index = self.left_layout.indexOf(sender_header)
+        if layout_index == -1: return 
+        
+        track_index = layout_index - 1
+        
+        # Get old color
+        old_color = "#5577cc"
+        if 0 <= track_index < len(self.audio.tracks):
+             old_color = getattr(self.audio.tracks[track_index], "color", "#5577cc")
+
+        cmd = ChangeColorCommand(self, track_index, old_color, new_color)
+        self.undo_stack.push(cmd)
+
+    def perform_color_change(self, track_index, color):
+        if 0 <= track_index < len(self.audio.tracks):
+            # Update Model
+            self.audio.tracks[track_index].color = color
+            
+            # Update Header Strip (Visually)
+            header_item = self.left_layout.itemAt(track_index + 1)
+            if header_item and header_item.widget():
+                header = header_item.widget()
+                if hasattr(header, 'color_strip'):
+                     # Avoid re-emitting signal if possible or just set it
+                     header.color_strip.update_color(color)
+
+            # Update Lane Clips
+            if 0 <= track_index < len(self.lanes):
+                lane = self.lanes[track_index]
+                lane.update_color(color)
+
+    def perform_toggle_mute(self, track_index):
+        if 0 <= track_index < len(self.audio.tracks):
+            self.audio.toggle_mute(track_index)
+            
+            # Sync UI
+            is_muted = self.audio.tracks[track_index].is_muted
+            header_item = self.left_layout.itemAt(track_index + 1)
+            if header_item and header_item.widget():
+                header_item.widget().set_muted(is_muted)
+
+    def perform_toggle_solo(self, track_index):
+        if 0 <= track_index < len(self.audio.tracks):
+             self.audio.toggle_solo(track_index)
+             
+             # Sync UI
+             is_soloed = self.audio.tracks[track_index].is_soloed
+             header_item = self.left_layout.itemAt(track_index + 1)
+             if header_item and header_item.widget():
+                 header_item.widget().set_soloed(is_soloed)
+             
+             self.main_window.ui_timer.start()
 
     def on_clip_moved(self, clip_index, old_start_time, new_start_time):
         sender_lane = self.sender()
@@ -383,14 +450,24 @@ class TrackManager(QObject):
             
             lane.clear_clips() 
             
+            # Retrieve current color from header
+            header_item = self.left_layout.itemAt(lane_index + 1)
+            color = "#5577cc" # Default fallback
+            if header_item and header_item.widget():
+                header = header_item.widget()
+                if hasattr(header, 'color_strip'):
+                     color = header.color_strip.current_color
+            
             for clip in track.clips:
                 lane.add_clip(
                     clip.name, 
                     clip.start_time, 
                     clip.duration, 
                     clip.start_offset,
-                    "#5577cc", 
-                    clip.waveform
+                    color, 
+                    clip.waveform,
+                    clip.data,
+                    track.sample_rate
                 )
 
     def update_global_duration(self):
@@ -503,6 +580,7 @@ class TrackManager(QObject):
             # Apply saved state
             track.is_muted = track_info.get("is_muted", False)
             track.is_soloed = track_info.get("is_soloed", False)
+            track.color = track_info.get("color", "#4466aa") # Load saved color
             
             # Reconstruct Clips
             track.clips = []

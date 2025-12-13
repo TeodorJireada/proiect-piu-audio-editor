@@ -18,7 +18,9 @@ class ProjectManager:
                 "name": track.name,
                 "file_path": track.file_path,
                 "is_muted": track.is_muted,
+                "is_muted": track.is_muted,
                 "is_soloed": track.is_soloed,
+                "color": getattr(track, "color", "#4466aa"), # Save color
                 "clips": []
             }
 

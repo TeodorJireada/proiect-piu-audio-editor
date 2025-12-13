@@ -21,8 +21,6 @@ class AudioEngine(QObject):
         if 0 <= index < len(self.tracks):
             del self.tracks[index]
 
-    # set_track_start_time removed - use clip.start_time instead
-
     def toggle_mute(self, index):
         if 0 <= index < len(self.tracks): 
             self.tracks[index].is_muted = not self.tracks[index].is_muted
@@ -54,6 +52,7 @@ class AudioEngine(QObject):
             callback=self.audio_callback, blocksize=2048
         )
         self.stream.start()
+
 
     # MIXING ENGINE 
     

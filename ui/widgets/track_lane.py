@@ -1,5 +1,6 @@
-from PySide6.QtCore import Qt, QRect, Signal
-from PySide6.QtGui import QColor, QPainter, QPen, QBrush
+from PySide6.QtCore import Qt, QRect, Signal, QPointF
+from PySide6.QtGui import QColor, QPainter, QPen, QBrush, QPolygonF
+import numpy as np
 from PySide6.QtWidgets import QFrame
 
 class TrackLane(QFrame):
@@ -55,14 +56,16 @@ class TrackLane(QFrame):
         self.clips = []
         self.update()
 
-    def add_clip(self, name, start_time, duration, start_offset, color, waveform=None):
+    def add_clip(self, name, start_time, duration, start_offset, color, waveform=None, data=None, sample_rate=44100):
         self.clips.append({
             "name": name,
             "start_time": start_time,
             "duration": duration,
             "start_offset": start_offset,
             "color": color,
-            "waveform": waveform
+            "waveform": waveform,
+            "data": data,
+            "sample_rate": sample_rate
         })
         self.update()
 
@@ -78,6 +81,11 @@ class TrackLane(QFrame):
         if 0 <= clip_index < len(self.clips):
             self.clips[clip_index]['start_time'] = start_time
             self.update()
+
+    def update_color(self, new_color):
+        for clip in self.clips:
+            clip['color'] = new_color
+        self.update()
 
     def set_playhead(self, x):
         self.playhead_x = x
@@ -235,41 +243,91 @@ class TrackLane(QFrame):
             width = int(clip['duration'] * self.pixels_per_second)
             
             # Draw Clip Background
-            clip_rect = QRect(start_x, 5, width, 70)
+            # Top border 1px lower to be visible
+            clip_rect = QRect(start_x, 1, width, self.height() - 2)
+            
             painter.setBrush(QBrush(QColor(30, 30, 40))) 
             painter.setPen(QColor(clip['color']))        
-            painter.drawRoundedRect(clip_rect, 3, 3)
+            painter.drawRoundedRect(clip_rect, 6, 6) # Rounded corners
 
             # DRAW WAVEFORM
             if clip['waveform'] is not None:
                 wave_color = QColor(clip['color'])
-                wave_color.setAlpha(200)
-                painter.setPen(wave_color)
                 
-                waveform = clip['waveform']
+                # Fill Color
+                fill_color = QColor(wave_color)
+                fill_color.setAlpha(100) # Semi-transparent fill
+                
+                # Stroke Color
+                stroke_color = QColor(wave_color)
+                stroke_color.setAlpha(255) # Opaque stroke
 
-                # Original samples per second (from track_loader)
+                waveform = clip['waveform']
                 original_sps = 100 
 
-                for x in range(width):
-                    # Time at this pixel relative to clip start
-                    t = x / self.pixels_per_second
-                    
-                    # Add start_offset
-                    t += clip['start_offset']
-                    
-                    # Index in waveform array
-                    idx = int(t * original_sps)
-                    
-                    if idx < len(waveform):
-                        val = float(waveform[idx])
-                        bar_height = val * 35 
-                        
-                        x_draw = start_x + x
-                        y1 = int(mid_y - bar_height)
-                        y2 = int(mid_y + bar_height)
-                        
-                        painter.drawLine(x_draw, y1, x_draw, y2)
+                # View Culling: Determine visible range
+                view_min_x = event.rect().left()
+                view_max_x = event.rect().right()
+                
+                # Clip bounds in widget coordinates
+                clip_min_x = start_x
+                clip_max_x = start_x + width
+                
+                # Intersection
+                draw_start_x = max(view_min_x, clip_min_x)
+                draw_end_x = min(view_max_x, clip_max_x)
+                
+                if draw_start_x < draw_end_x:
+                     points_top = []
+                     points_bottom = []
+                     mid_y = self.height() / 2
+                     
+                     if clip.get('waveform') is not None:
+                         waveform = clip['waveform']
+                         
+                         clip_offset = clip['start_offset']
+                         
+                         step = 2
+                         delta = int(draw_start_x - start_x)
+                         k = (delta + step - 1) // step if delta > 0 else 0 
+                         aligned_start_x = int(start_x + k * step)
+                         
+                         for x_screen in range(aligned_start_x, int(draw_end_x), step): 
+                             t = (x_screen - start_x) / self.pixels_per_second + clip_offset
+                             wf_idx = int(t * original_sps)
+                             
+                             if 0 <= wf_idx < len(waveform):
+                                 val = float(waveform[wf_idx])
+                                 
+                                 # Top 
+                                 y_top = mid_y - (val * 35)
+                                 points_top.append(QPointF(x_screen, y_top))
+                                 
+                                 # Bottom
+                                 y_bottom = mid_y + (val * 35)
+                                 points_bottom.append(QPointF(x_screen, y_bottom))
+
+                     if points_top and points_bottom:
+                         # Create Polygon for Fill
+                         # Top points (Left -> Right) + Bottom points (Right -> Left)
+                         fill_poly = QPolygonF()
+                         for p in points_top:
+                             fill_poly.append(p)
+                         for p in reversed(points_bottom):
+                             fill_poly.append(p)
+                         
+                         # Close the loop
+                         fill_poly.append(points_top[0])
+
+                         painter.setBrush(QBrush(fill_color))
+                         painter.setPen(Qt.NoPen)
+                         painter.drawPolygon(fill_poly)
+
+                         # Draw Strokes (Outline)
+                         painter.setBrush(Qt.NoBrush)
+                         painter.setPen(QPen(stroke_color, 1))
+                         painter.drawPolyline(points_top)
+                         painter.drawPolyline(points_bottom)
 
             # Draw Clip Name Overlay
             painter.setPen(QColor(255, 255, 255))
