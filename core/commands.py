@@ -135,3 +135,77 @@ class ToggleSoloCommand(Command):
 
     def undo(self):
         self.track_manager.perform_toggle_solo(self.track_index)
+
+class ChangeVolumeCommand(Command):
+    def __init__(self, track_manager, track_index, old_volume, new_volume):
+        self.track_manager = track_manager
+        self.track_index = track_index
+        self.old_volume = old_volume
+        self.new_volume = new_volume
+
+    def execute(self):
+        self.track_manager.perform_volume_change(self.track_index, self.new_volume)
+
+    def undo(self):
+        self.track_manager.perform_volume_change(self.track_index, self.old_volume)
+
+class ChangePanCommand(Command):
+    def __init__(self, track_manager, track_index, old_pan, new_pan):
+        self.track_manager = track_manager
+        self.track_index = track_index
+        self.old_pan = old_pan
+        self.new_pan = new_pan
+
+    def execute(self):
+        self.track_manager.perform_pan_change(self.track_index, self.new_pan)
+
+    def undo(self):
+        self.track_manager.perform_pan_change(self.track_index, self.old_pan)
+
+class ChangeBPMCommand(Command):
+    def __init__(self, main_window, old_bpm, new_bpm):
+        self.main_window = main_window
+        self.old_bpm = old_bpm
+        self.new_bpm = new_bpm
+
+    def execute(self):
+        self.main_window.perform_bpm_change(self.new_bpm)
+
+    def undo(self):
+        self.main_window.perform_bpm_change(self.old_bpm)
+
+class ToggleLoopCommand(Command):
+    def __init__(self, main_window, enabled):
+        self.main_window = main_window
+        self.enabled = enabled
+
+    def execute(self):
+        self.main_window.perform_loop_toggle(self.enabled)
+
+    def undo(self):
+        self.main_window.perform_loop_toggle(not self.enabled)
+
+class ToggleSnapCommand(Command):
+    def __init__(self, main_window, enabled):
+        self.main_window = main_window
+        self.enabled = enabled
+
+    def execute(self):
+        self.main_window.perform_snap_toggle(self.enabled)
+
+    def undo(self):
+        self.main_window.perform_snap_toggle(not self.enabled)
+
+class PasteClipCommand(Command):
+    def __init__(self, track_manager, lane_index, clip_data, start_time):
+        self.track_manager = track_manager
+        self.lane_index = lane_index
+        self.clip_data = clip_data  # Source AudioClip object (or similar data)
+        self.start_time = start_time
+        self.new_clip_index = -1
+
+    def execute(self):
+        self.new_clip_index = self.track_manager.perform_paste_clip(self.lane_index, self.clip_data, self.start_time)
+
+    def undo(self):
+        self.track_manager.perform_delete_clip(self.lane_index, self.new_clip_index)

@@ -6,13 +6,19 @@ class AudioEngine(QObject):
     def __init__(self):
         super().__init__()
 
-        self.sample_rate = 44100 
+        self.sample_rate = 44100
+        self.channels = 2
+        self.playhead = 0 # in samples
+        self.bpm = 120
+        self.time_signature = (4, 4) # (numerator, denominator)
+        
         print(f"Audio Engine initialized at: {self.sample_rate} Hz")
 
         self.tracks = [] 
-        self.playhead = 0 
         self.is_playing = False
         self.stream = None
+        self.is_looping = False
+        self.loop_end_sample = 0
 
     def add_track_data(self, track_obj):
         self.tracks.append(track_obj)
@@ -28,6 +34,17 @@ class AudioEngine(QObject):
     def toggle_solo(self, index):
         if 0 <= index < len(self.tracks): 
             self.tracks[index].is_soloed = not self.tracks[index].is_soloed
+
+    def set_track_volume(self, index, volume):
+        if 0 <= index < len(self.tracks):
+            self.tracks[index].volume = max(0.0, min(1.0, volume))
+
+    def set_track_pan(self, index, pan):
+        if 0 <= index < len(self.tracks):
+            self.tracks[index].pan = max(-1.0, min(1.0, pan))
+
+    def set_bpm(self, bpm):
+        self.bpm = max(20, min(999, bpm))
 
     def _kill_stream(self):
         if self.is_playing:
@@ -46,6 +63,10 @@ class AudioEngine(QObject):
 
     def start_playback(self):
         if self.is_playing: return
+        
+        if self.is_looping:
+            self.calculate_loop_end()
+            
         self.is_playing = True
         self.stream = sd.OutputStream(
             samplerate=self.sample_rate, channels=2,
@@ -53,6 +74,38 @@ class AudioEngine(QObject):
         )
         self.stream.start()
 
+
+
+    def set_looping(self, enabled):
+        self.is_looping = enabled
+        if enabled:
+            self.calculate_loop_end()
+
+    def calculate_loop_end(self):
+        max_end_time = 0.0
+        for track in self.tracks:
+            for clip in track.clips:
+                end = clip.start_time + clip.duration
+                if end > max_end_time:
+                    max_end_time = end
+        
+        if max_end_time == 0:
+            self.loop_end_sample = 0
+            return
+
+        # Convert to Bars
+        beats_per_bar = self.time_signature[0]
+        seconds_per_beat = 60 / self.bpm
+        bar_duration = beats_per_bar * seconds_per_beat
+        
+        total_bars = max_end_time / bar_duration
+        import math
+        next_free_bar = math.ceil(total_bars)
+        if next_free_bar == 0: next_free_bar = 1 # Minimum 1 bar
+        
+        loop_end_time = next_free_bar * bar_duration
+        self.loop_end_sample = int(loop_end_time * self.sample_rate)
+        # print(f"Loop end calculated: {loop_end_time}s (Bar {next_free_bar+1})")
 
     # MIXING ENGINE 
     
@@ -95,8 +148,17 @@ class AudioEngine(QObject):
                     if offset_in_source_data < source_len:
                         read_len = min(overlap_len, source_len - offset_in_source_data)
                         
+                        # Calculate gains
+                        pan = track.pan
+                        left_gain = 1.0 if pan <= 0 else (1.0 - pan)
+                        right_gain = 1.0 if pan >= 0 else (1.0 + pan)
+                        
+                        # Apply volume and pan
+                        # efficient numpy broadcasting: (N, 2) * (1, 2)
+                        gains = np.array([left_gain, right_gain], dtype='float32') * track.volume
+                        
                         mix_buffer[buffer_offset : buffer_offset + read_len] += \
-                            clip.data[offset_in_source_data : offset_in_source_data + read_len]
+                            clip.data[offset_in_source_data : offset_in_source_data + read_len] * gains
         
         return mix_buffer
 
@@ -124,9 +186,7 @@ class AudioEngine(QObject):
         outdata[:] = mix_buffer
         self.playhead += frames
 
-    def set_playhead(self, pixel_x, px_per_second=100):
-        seconds = pixel_x / px_per_second
-        self.playhead = int(seconds * self.sample_rate)
-
-    def get_playhead_time(self):
-        return self.playhead / self.sample_rate
+        # Loop Check
+        if self.is_looping and self.loop_end_sample > 0:
+            if self.playhead >= self.loop_end_sample:
+                self.playhead = 0 # Wrap around

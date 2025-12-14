@@ -1,6 +1,6 @@
 import json
 import os
-from core.models import AudioTrackData, AudioClip
+from core.models import AudioTrackData
 from core.track_loader import TrackLoader
 
 class ProjectManager:
@@ -10,6 +10,7 @@ class ProjectManager:
     def save_project(self, file_path, audio_engine):
         project_data = {
             "version": "1.0",
+            "bpm": getattr(audio_engine, "bpm", 120),
             "tracks": []
         }
 
@@ -18,8 +19,9 @@ class ProjectManager:
                 "name": track.name,
                 "file_path": track.file_path,
                 "is_muted": track.is_muted,
-                "is_muted": track.is_muted,
                 "is_soloed": track.is_soloed,
+                "volume": getattr(track, "volume", 1.0), 
+                "pan": getattr(track, "pan", 0.0),
                 "color": getattr(track, "color", "#4466aa"), # Save color
                 "clips": []
             }
@@ -42,6 +44,9 @@ class ProjectManager:
         except Exception as e:
             print(f"Error saving project: {e}")
             return False
+
+    def load_project(self, file_path):
+        return self.parse_project_file(file_path)
 
     def parse_project_file(self, file_path):
         try:

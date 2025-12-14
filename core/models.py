@@ -15,7 +15,8 @@ class AudioTrackData:
         self.sample_rate = sample_rate
         self.waveform = None
         self.is_muted = False
-        self.is_muted = False
         self.is_soloed = False
+        self.volume = 1.0
+        self.pan = 0.0
         self.color = "#4466aa" # Default color
         self.clips = [] # List of AudioClip

@@ -5,7 +5,7 @@ from PySide6.QtWidgets import QFileDialog, QMessageBox, QCheckBox
 from ui.widgets.track_header import TrackHeader
 from ui.widgets.track_lane import TrackLane
 from core.track_loader import TrackLoader
-from core.commands import AddTrackCommand, DeleteTrackCommand, MoveClipCommand, TrimClipCommand, SplitClipCommand, DuplicateClipCommand, DeleteClipCommand, ChangeColorCommand, ToggleMuteCommand, ToggleSoloCommand
+from core.commands import AddTrackCommand, DeleteTrackCommand, MoveClipCommand, TrimClipCommand, SplitClipCommand, DuplicateClipCommand, DeleteClipCommand, ChangeColorCommand, ToggleMuteCommand, ToggleSoloCommand, ChangeVolumeCommand, ChangePanCommand, PasteClipCommand
 
 from core.models import AudioClip
 
@@ -31,11 +31,42 @@ class TrackManager(QObject):
         self.pending_tracks = []
         self.loaded_count = 0
         self.current_tool = "MOVE"
+        self.temp_volumes = {} # Track index -> start volume
+        self.temp_pans = {}    # Track index -> start pan
+        self.temp_volumes = {} # Track index -> start volume
+        self.temp_pans = {}    # Track index -> start pan
+        self.snap_enabled = False
+        self.clipboard_clip = None # Stores data of copied clip
 
     def set_active_tool(self, tool_name):
         self.current_tool = tool_name
         for lane in self.lanes:
             lane.set_tool(tool_name)
+
+    def set_snap_enabled(self, enabled):
+        self.snap_enabled = enabled
+        for lane in self.lanes:
+            lane.set_snap_enabled(enabled)
+
+    def set_bpm(self, bpm):
+        for lane in self.lanes:
+            lane.set_bpm(bpm)
+
+    def scale_project_time(self, scale_factor):
+        """
+        Scales the start time of all clips by the given factor.
+        Used when BPM changes to maintain musical grid position.
+        """
+        # Update Model
+        for track in self.audio.tracks:
+            for clip in track.clips:
+                clip.start_time *= scale_factor
+                
+        # Update UI Lanes
+        for lane in self.lanes:
+            for clip in lane.clips:
+                clip['start_time'] *= scale_factor
+            lane.update()
 
     def import_track(self):
         file_path, _ = QFileDialog.getOpenFileName(self.main_window, "Import Audio", "", "Audio Files (*.wav *.mp3 *.ogg *.flac *.opus)")
@@ -85,7 +116,7 @@ class TrackManager(QObject):
         filename = os.path.basename(track_data.name)
         
         # Create Header
-        filename = os.path.basename(track_data.name)
+
         
         # Use saved color or default if not present
         color = getattr(track_data, "color", "#4466aa")
@@ -96,17 +127,34 @@ class TrackManager(QObject):
         header.delete_clicked.connect(self.delete_track_request)
         header.mute_clicked.connect(self.handle_mute)
         header.solo_clicked.connect(self.handle_solo)
-        header.color_changed.connect(self.handle_track_color_change) # Connect new signal
+        header.color_changed.connect(self.handle_track_color_change) 
+        header.volume_changed.connect(self.handle_volume_change)
+        header.slider_pressed.connect(self.handle_slider_press)
+        header.volume_set.connect(self.handle_volume_set)
+        
+        header.pan_changed.connect(self.handle_pan_change)
+        header.dial_pressed.connect(self.handle_dial_press)
+        header.pan_set.connect(self.handle_pan_set)
+        
+        # Set initial volume and pan
+        header.set_volume(track_data.volume)
+        header.set_pan(track_data.pan)
         
         # Create Lane with Waveform
         lane = TrackLane()
-        lane.set_tool(self.current_tool)
         lane.set_zoom(self.timeline.pixels_per_second)
+        lane.set_duration(self.timeline.duration)
+        lane.set_tool(self.current_tool)
+        lane.set_snap_enabled(self.snap_enabled) # Apply Snap
+        lane.set_bpm(self.audio.bpm) # Apply BPM
         lane.clip_moved.connect(self.on_clip_moved)
         lane.clip_trimmed.connect(self.on_clip_trimmed)
         lane.clip_split.connect(self.on_clip_split)
         lane.clip_duplicated.connect(self.on_clip_duplicated)
+        lane.clip_duplicated.connect(self.on_clip_duplicated)
         lane.clip_deleted.connect(self.on_clip_deleted)
+        lane.clip_selected.connect(self.on_clip_selected)
+        lane.paste_requested.connect(self.on_paste_requested)
         
         # Add clips to lane
         for clip in track_data.clips:
@@ -203,6 +251,105 @@ class TrackManager(QObject):
 
         cmd = ChangeColorCommand(self, track_index, old_color, new_color)
         self.undo_stack.push(cmd)
+
+    def handle_volume_change(self, volume):
+        sender_header = self.sender()
+        layout_index = self.left_layout.indexOf(sender_header)
+        if layout_index == -1: return 
+        
+        track_index = layout_index - 1
+        
+        if 0 <= track_index < len(self.audio.tracks):
+             self.audio.set_track_volume(track_index, volume)
+
+    def handle_slider_press(self):
+        sender_header = self.sender()
+        layout_index = self.left_layout.indexOf(sender_header)
+        if layout_index == -1: return 
+        
+        track_index = layout_index - 1
+        
+        if 0 <= track_index < len(self.audio.tracks):
+            self.temp_volumes[track_index] = self.audio.tracks[track_index].volume
+
+    def handle_volume_set(self, new_volume):
+        sender_header = self.sender()
+        layout_index = self.left_layout.indexOf(sender_header)
+        if layout_index == -1: return 
+        
+        track_index = layout_index - 1
+        
+        old_volume = self.temp_volumes.get(track_index, 1.0)
+        # Clean up
+        if track_index in self.temp_volumes:
+            del self.temp_volumes[track_index]
+
+        if abs(new_volume - old_volume) > 0.001:
+            cmd = ChangeVolumeCommand(self, track_index, old_volume, new_volume)
+            self.undo_stack.push(cmd)
+
+    def perform_volume_change(self, track_index, volume):
+        if 0 <= track_index < len(self.audio.tracks):
+            # Update Model
+            self.audio.tracks[track_index].volume = volume
+            
+            # Update Engine
+            self.audio.set_track_volume(track_index, volume)
+            
+            # Update UI
+            header_item = self.left_layout.itemAt(track_index + 1)
+            if header_item and header_item.widget():
+                header = header_item.widget()
+                header.set_volume(volume)
+
+    def handle_pan_change(self, pan):
+        sender_header = self.sender()
+        layout_index = self.left_layout.indexOf(sender_header)
+        if layout_index == -1: return 
+        
+        track_index = layout_index - 1
+        
+        if 0 <= track_index < len(self.audio.tracks):
+             self.audio.set_track_pan(track_index, pan)
+
+    def handle_dial_press(self):
+        sender_header = self.sender()
+        layout_index = self.left_layout.indexOf(sender_header)
+        if layout_index == -1: return 
+        
+        track_index = layout_index - 1
+        
+        if 0 <= track_index < len(self.audio.tracks):
+            self.temp_pans[track_index] = self.audio.tracks[track_index].pan
+
+    def handle_pan_set(self, new_pan):
+        sender_header = self.sender()
+        layout_index = self.left_layout.indexOf(sender_header)
+        if layout_index == -1: return 
+        
+        track_index = layout_index - 1
+        
+        old_pan = self.temp_pans.get(track_index, 0.0)
+        if track_index in self.temp_pans:
+            del self.temp_pans[track_index]
+
+        if abs(new_pan - old_pan) > 0.001:
+            cmd = ChangePanCommand(self, track_index, old_pan, new_pan)
+            self.undo_stack.push(cmd)
+
+    def perform_pan_change(self, track_index, pan):
+        if 0 <= track_index < len(self.audio.tracks):
+            # Update Model
+            self.audio.tracks[track_index].pan = pan
+            
+            # Update Engine
+            self.audio.set_track_pan(track_index, pan)
+            
+            # Update UI
+            header_item = self.left_layout.itemAt(track_index + 1)
+            if header_item and header_item.widget():
+                header = header_item.widget()
+                header.set_pan(pan)
 
     def perform_color_change(self, track_index, color):
         if 0 <= track_index < len(self.audio.tracks):
@@ -504,13 +651,18 @@ class TrackManager(QObject):
     def load_project(self, file_path):
         from core.project_manager import ProjectManager
         import numpy as np
-        from core.models import AudioTrackData
-        
+        import os # Added import for os module
+
         pm = ProjectManager()
         project_data = pm.parse_project_file(file_path)
         
         if not project_data:
             return
+
+        # Set BPM
+        bpm = project_data.get("bpm", 120)
+        if hasattr(self.main_window, 'perform_bpm_change'):
+            self.main_window.perform_bpm_change(bpm)
 
         self.clear_all_tracks()
         
@@ -557,7 +709,7 @@ class TrackManager(QObject):
 
     def finalize_batch_load(self):
         import numpy as np
-        from core.models import AudioTrackData, AudioClip
+
 
         for i, item in enumerate(self.pending_tracks):
             if item is None: continue
@@ -580,6 +732,8 @@ class TrackManager(QObject):
             # Apply saved state
             track.is_muted = track_info.get("is_muted", False)
             track.is_soloed = track_info.get("is_soloed", False)
+            track.volume = track_info.get("volume", 1.0) 
+            track.pan = track_info.get("pan", 0.0)
             track.color = track_info.get("color", "#4466aa") # Load saved color
             
             # Reconstruct Clips
@@ -600,3 +754,63 @@ class TrackManager(QObject):
         self.loading_finished.emit()
         self.pending_tracks = []
         self.loaded_count = 0
+
+    def on_clip_selected(self, clip_index):
+        # Determine sender lane
+        sender_lane = self.sender()
+        if sender_lane not in self.lanes: return
+        lane_index = self.lanes.index(sender_lane)
+
+        # Clear selection in ALL lanes (including sender first, to be safe, or just others)
+        for lane in self.lanes:
+            if lane == sender_lane:
+                lane.set_selection(clip_index)
+            else:
+                lane.set_selection(-1)
+
+        # Get clip data from AudioEngine
+        track = self.audio.tracks[lane_index]
+        if 0 <= clip_index < len(track.clips):
+            self.clipboard_clip = track.clips[clip_index]
+            print(f"Clip copied: {self.clipboard_clip.name}")
+
+    def on_paste_requested(self, start_time):
+        if not self.clipboard_clip: return
+        
+        sender_lane = self.sender()
+        if sender_lane not in self.lanes: return
+        lane_index = self.lanes.index(sender_lane)
+        
+        cmd = PasteClipCommand(self, lane_index, self.clipboard_clip, start_time)
+        self.undo_stack.push(cmd)
+
+    def perform_paste_clip(self, lane_index, clip_data, start_time):
+        # Create new AudioClip instance
+        new_clip = AudioClip(
+            data=clip_data.data, # Shared ref to data
+            start_time=start_time,
+            start_offset=clip_data.start_offset,
+            duration=clip_data.duration,
+            name=clip_data.name,
+            waveform=clip_data.waveform
+        )
+        
+        # Add to AudioEngine
+        track = self.audio.tracks[lane_index]
+        track.clips.append(new_clip)
+        new_clip_index = len(track.clips) - 1
+        
+        # Add to UI
+        lane = self.lanes[lane_index]
+        lane.add_clip(
+            new_clip.name,
+            new_clip.start_time,
+            new_clip.duration,
+            new_clip.start_offset,
+            getattr(track, "color", "#4466aa"),
+            new_clip.waveform,
+            new_clip.data,
+            track.sample_rate
+        )
+        
+        return new_clip_index

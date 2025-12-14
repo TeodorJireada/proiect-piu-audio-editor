@@ -15,6 +15,7 @@ from ui.widgets.ribbon import Ribbon
 from ui.track_manager import TrackManager
 from core.command_stack import UndoStack
 from core.project_manager import ProjectManager
+from core.commands import ChangeBPMCommand, ToggleLoopCommand, ToggleSnapCommand
 from ui.theme_manager import ThemeManager
 from PySide6.QtGui import QAction
 
@@ -44,7 +45,7 @@ class MainWindow(QMainWindow):
 
         self.setup_ribbon()
         self.setup_workspace()
-        self.setup_menu()
+        # self.setup_menu() # Menu removed
         
         self.project_manager = ProjectManager()
         self.current_project_path = None
@@ -83,16 +84,32 @@ class MainWindow(QMainWindow):
 
     def setup_ribbon(self):
         self.ribbon = Ribbon()
+        self.ribbon.new_clicked.connect(self.on_new_project)
+        self.ribbon.open_clicked.connect(self.on_open_project)
+        self.ribbon.save_clicked.connect(self.on_save_project)
+        self.ribbon.export_clicked.connect(self.on_export_audio)
+        self.ribbon.theme_switched.connect(lambda t: self.switch_theme(t))
+        self.ribbon.bpm_changed.connect(self.on_bpm_changed)
+        self.ribbon.snap_toggled.connect(self.on_snap_toggled)
+        
         self.ribbon.play_clicked.connect(self.toggle_playback)
         self.ribbon.stop_clicked.connect(self.stop_playback)
+        self.ribbon.loop_toggled.connect(self.on_loop_toggled)
+
         self.ribbon.undo_clicked.connect(self.undo_action)
         self.ribbon.redo_clicked.connect(self.redo_action)
-        self.ribbon.save_clicked.connect(self.on_save_project)
+        self.ribbon.tool_changed.connect(self.on_tool_changed)
         self.ribbon.tool_changed.connect(self.on_tool_changed)
         self.main_layout.addWidget(self.ribbon)
 
     def on_tool_changed(self, tool_name):
         self.track_manager.set_active_tool(tool_name)
+
+    def on_bpm_changed(self, bpm):
+        self.audio.set_bpm(bpm)
+        self.timeline.set_bpm(bpm)
+        self.track_container.set_bpm(bpm)
+        self.update_dirty_state()
 
     def setup_workspace(self):
         splitter = QSplitter(Qt.Horizontal)
@@ -140,36 +157,44 @@ class MainWindow(QMainWindow):
 
         # RIGHT PANEL (Timeline + Lanes)
         right_widget = QWidget()
-        right_layout = QVBoxLayout(right_widget)
-        right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.setSpacing(0)
-
+        self.right_layout = QVBoxLayout(right_widget)
+        self.right_layout.setContentsMargins(0, 0, 0, 0)
+        self.right_layout.setSpacing(0)
+        
+        self.timeline = TimelineRuler()
+        self.timeline.set_bpm(self.audio.bpm)
+        self.timeline.position_changed.connect(self.user_seek)
+        self.timeline.zoom_request.connect(self.perform_zoom)
         self.timeline_scroll = QScrollArea()
         self.timeline_scroll.setWidgetResizable(True)
         self.timeline_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.timeline_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.timeline_scroll.setFrameShape(QFrame.NoFrame)
         self.timeline_scroll.setFixedHeight(30)
-
-        self.timeline = TimelineRuler()
-        self.timeline.position_changed.connect(self.user_seek)
-        self.timeline.zoom_request.connect(self.handle_timeline_zoom) # Connect new signal
         self.timeline_scroll.setWidget(self.timeline)
-        right_layout.addWidget(self.timeline_scroll)
+        self.right_layout.addWidget(self.timeline_scroll)
 
+        # Track Container (for grid lines and holding lanes)
         self.right_scroll = QScrollArea()
         self.right_scroll.setWidgetResizable(True)
         self.right_scroll.setFrameShape(QFrame.NoFrame)
-        
-        self.right_container = TrackContainer()
-        self.right_layout = QVBoxLayout(self.right_container)
-        self.right_layout.setContentsMargins(0, 0, 0, 0)
-        self.right_layout.setSpacing(0)
-        self.right_layout.addStretch()
-        self.right_scroll.setWidget(self.right_container)
+        self.right_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn) # Ensure horizontal scrollbar is always visible for track content
 
-        right_layout.addWidget(self.right_scroll)
-        splitter.addWidget(right_widget)
+        self.right_content = TrackContainer() # This is the widget that draws the grid and holds the track lanes
+        self.right_content.pixels_per_second = self.timeline.pixels_per_second
+        self.right_content.set_bpm(self.audio.bpm)
+        
+        self.right_inner_layout = QVBoxLayout(self.right_content) # This layout will hold the actual TrackLane widgets
+        self.right_inner_layout.setContentsMargins(0, 0, 0, 0)
+        self.right_inner_layout.setSpacing(0)
+        self.right_inner_layout.addStretch()
+        
+        self.right_scroll.setWidget(self.right_content)
+        self.right_layout.addWidget(self.right_scroll) # Add the scroll area to the main right_layout
+        
+        self.track_container = self.right_content # Alias for compatibility
+        
+        splitter.addWidget(right_widget) # Add the main right_widget to the splitter
         splitter.setSizes([200, 1000])
 
         self.sync_scrollbars()
@@ -181,10 +206,18 @@ class MainWindow(QMainWindow):
             self.undo_stack, 
             self.timeline, 
             self.left_layout, 
-            self.right_layout, 
+            self.right_inner_layout, 
             self.btn_add_track,
-            self.right_container
+            self.track_container
         )
+        
+        # Connect Grid Painting
+        self.track_manager.track_container = self.track_container
+
+        # Initialize Logic States from UI Defaults
+        # (Directly set values to match UI, do not push to undo stack)
+        self.audio.set_looping(self.ribbon.btn_loop.isChecked())
+        self.track_manager.set_snap_enabled(self.ribbon.chk_snap.isChecked())
         
         # Connect Loading Signals
         self.track_manager.loading_started.connect(lambda: self.ribbon.show_loading("Loading Project..."))
@@ -378,44 +411,8 @@ class MainWindow(QMainWindow):
         else:
             event.ignore()
 
-    def setup_menu(self):
-        menu_bar = self.menuBar()
-        file_menu = menu_bar.addMenu("File")
-        
-        action_new = QAction("New Project", self)
-        action_new.triggered.connect(self.on_new_project)
-        file_menu.addAction(action_new)
+    # setup_menu removed
 
-        action_open = QAction("Open Project", self)
-        action_open.triggered.connect(self.on_open_project)
-        file_menu.addAction(action_open)
-        
-        action_save = QAction("Save Project", self)
-        action_save.triggered.connect(self.on_save_project)
-        file_menu.addAction(action_save)
-
-        action_save_as = QAction("Save Project As...", self)
-        action_save_as.triggered.connect(self.on_save_project_as)
-        file_menu.addAction(action_save_as)
-        
-        file_menu.addSeparator()
-        
-        action_export = QAction("Export Audio (WAV)", self)
-        action_export.triggered.connect(self.on_export_audio)
-        file_menu.addAction(action_export)
-
-        # View Menu
-        view_menu = menu_bar.addMenu("View")
-        
-        theme_menu = view_menu.addMenu("Theme")
-        
-        action_theme_dark = QAction("Dark", self)
-        action_theme_dark.triggered.connect(lambda: self.switch_theme("dark"))
-        theme_menu.addAction(action_theme_dark)
-        
-        action_theme_hc = QAction("High Contrast", self)
-        action_theme_hc.triggered.connect(lambda: self.switch_theme("high_contrast"))
-        theme_menu.addAction(action_theme_hc)
 
     def switch_theme(self, theme_name):
         app = QApplication.instance()
@@ -489,3 +486,54 @@ class MainWindow(QMainWindow):
             
             self.audio.export_audio(file_path, export_duration)
             QMessageBox.information(self, "Success", f"Audio exported to {file_path}")
+
+    def on_bpm_changed(self, new_bpm):
+        old_bpm = self.audio.bpm
+        if old_bpm == new_bpm: return
+        
+        cmd = ChangeBPMCommand(self, old_bpm, new_bpm)
+        self.undo_stack.push(cmd)
+
+    def perform_bpm_change(self, new_bpm):
+        # Update UI without triggering signal loop
+        self.ribbon.spin_bpm.blockSignals(True)
+        self.ribbon.spin_bpm.setValue(new_bpm)
+        self.ribbon.spin_bpm.blockSignals(False)
+
+        old_bpm = self.audio.bpm
+        
+        # Scaling Logic
+        if old_bpm != new_bpm and old_bpm > 0:
+            scale_factor = old_bpm / new_bpm
+            self.track_manager.scale_project_time(scale_factor)
+            
+        self.audio.set_bpm(new_bpm)
+        self.timeline.set_bpm(new_bpm)
+        if hasattr(self, 'track_container'):
+             self.track_container.set_bpm(new_bpm)
+        self.track_manager.set_bpm(new_bpm) 
+             
+        self.update_dirty_state()
+
+    def on_snap_toggled(self, enabled):
+        # Prevent recursion if updated programmatically
+        if self.ribbon.chk_snap.isChecked() != enabled: return 
+        
+        cmd = ToggleSnapCommand(self, enabled)
+        self.undo_stack.push(cmd)
+
+    def perform_snap_toggle(self, enabled):
+        self.ribbon.chk_snap.blockSignals(True)
+        self.ribbon.chk_snap.setChecked(enabled)
+        self.ribbon.chk_snap.blockSignals(False)
+        self.track_manager.set_snap_enabled(enabled)
+
+    def on_loop_toggled(self, enabled):
+        cmd = ToggleLoopCommand(self, enabled)
+        self.undo_stack.push(cmd)
+
+    def perform_loop_toggle(self, enabled):
+        self.ribbon.btn_loop.blockSignals(True)
+        self.ribbon.btn_loop.setChecked(enabled)
+        self.ribbon.btn_loop.blockSignals(False)
+        self.audio.set_looping(enabled)

@@ -8,6 +8,7 @@ class TrackContainer(QWidget):
         self.setObjectName("TrackContainer")
         self.pixels_per_second = 10
         self.duration = 60
+        self.bpm = 120
         self.setMinimumWidth(3000)
 
     def set_zoom(self, px_per_sec):
@@ -24,28 +25,43 @@ class TrackContainer(QWidget):
         width = int(self.duration * self.pixels_per_second)
         self.setMinimumWidth(width)
 
+    def set_bpm(self, bpm):
+        self.bpm = bpm
+        self.update()
+
     def paintEvent(self, event):
         painter = QPainter(self)
         
         # Draw Background Grid
         painter.setPen(QColor(40, 40, 40))
         
-        # Determine grid interval based on zoom (similar to timeline)
-        if self.pixels_per_second > 10:
-            grid_interval = 1
-        elif self.pixels_per_second > 2:
-            grid_interval = 10
-        elif self.pixels_per_second > 0.5:
-            grid_interval = 30
+        # Calculations
+        seconds_per_beat = 60 / getattr(self, "bpm", 120)
+        pixels_per_beat = self.pixels_per_second * seconds_per_beat
+        
+        # Decide interval (beats) for grid
+        if pixels_per_beat > 100:
+            beat_interval = 1 
+        elif pixels_per_beat > 50:
+            beat_interval = 2 
+        elif pixels_per_beat > 20:
+            beat_interval = 4 
+        elif pixels_per_beat > 5:
+            beat_interval = 16 
         else:
-            grid_interval = 60
+            beat_interval = 32 
 
-        # Draw grid lines
-        max_sec = int(self.width() / self.pixels_per_second) + 1
-        for sec in range(0, max_sec, grid_interval):
-            x = int(sec * self.pixels_per_second)
-            if x > self.width(): break
-            
-            # Main tick line
-            painter.setPen(QColor(60, 60, 60))
-            painter.drawLine(x, 0, x, self.height())
+        beats_total = int(self.duration / seconds_per_beat) + 1
+        
+        for beat_idx in range(0, beats_total, beat_interval):
+             x = int(beat_idx * pixels_per_beat)
+             if x > self.width(): break
+             
+             is_bar_start = (beat_idx % 4 == 0)
+             
+             if is_bar_start:
+                 painter.setPen(QColor(80, 80, 80)) # Major line
+             else:
+                 painter.setPen(QColor(50, 50, 50)) # Minor line
+                 
+             painter.drawLine(x, 0, x, self.height())

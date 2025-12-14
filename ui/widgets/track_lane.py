@@ -8,7 +8,9 @@ class TrackLane(QFrame):
     clip_trimmed = Signal(int, float, float, float, float, float, float) 
     clip_split = Signal(int, float) 
     clip_duplicated = Signal(int, float) 
-    clip_deleted = Signal(int) 
+    clip_deleted = Signal(int)
+    clip_selected = Signal(int) # Emits index immediately on click
+    paste_requested = Signal(float) # Emits time on empty click
     
     def __init__(self):
         super().__init__()
@@ -20,6 +22,8 @@ class TrackLane(QFrame):
         self.pixels_per_second = 10
         self.duration = 60
         self.is_placeholder = False
+        self.snap_enabled = False
+        self.bpm = 120
         
         # Dragging State
         self.dragging_clip_index = -1
@@ -30,9 +34,22 @@ class TrackLane(QFrame):
         self.clip_initial_offset = 0.0
         
         self.HANDLE_WIDTH = 10
-        self.HANDLE_WIDTH = 10
+
         self.setMouseTracking(True)
         self.active_tool = "MOVE"
+        self.selected_clip_index = -1
+
+    def set_selection(self, index):
+        self.selected_clip_index = index
+        self.update()
+
+    def get_snapped_time(self, time):
+        if not self.snap_enabled:
+            return time
+        
+        beat_duration = 60.0 / self.bpm
+        snap_interval = beat_duration / 4.0 # 1/4 beat
+        return round(time / snap_interval) * snap_interval
 
     def set_tool(self, tool_name):
         self.active_tool = tool_name
@@ -47,6 +64,12 @@ class TrackLane(QFrame):
         self.duration = duration
         self.update_width()
         self.update()
+
+    def set_snap_enabled(self, enabled):
+        self.snap_enabled = enabled
+
+    def set_bpm(self, bpm):
+        self.bpm = bpm
 
     def update_width(self):
         width = int(self.duration * self.pixels_per_second)
@@ -98,37 +121,74 @@ class TrackLane(QFrame):
             click_x = event.position().x()
             
             # Check if clicked on a clip
+            clicked_clip_index = -1
             for i, clip in enumerate(self.clips):
                 start_x = int(clip['start_time'] * self.pixels_per_second)
                 width = int(clip['duration'] * self.pixels_per_second)
                 end_x = start_x + width
                 
                 if start_x <= click_x <= end_x:
-                    if self.active_tool == "SPLIT":
-                        self.handle_split(i, click_x)
-                        return
-                    elif self.active_tool == "DUPLICATE":
-                        self.handle_duplicate(i)
-                        return
-                    elif self.active_tool == "DELETE":
-                        self.handle_delete(i)
-                        return
-                    
-                    # MOVE TOOL LOGIC
-                    self.dragging_clip_index = i
-                    self.drag_start_x = click_x
-                    self.clip_initial_start_time = clip['start_time']
-                    self.clip_initial_duration = clip['duration']
-                    self.clip_initial_offset = clip['start_offset']
-                    
-                    # Check for handles
-                    if click_x < start_x + self.HANDLE_WIDTH:
-                        self.drag_mode = "TRIM_LEFT"
-                    elif click_x > end_x - self.HANDLE_WIDTH:
-                        self.drag_mode = "TRIM_RIGHT"
-                    else:
-                        self.drag_mode = "MOVE"
+                    clicked_clip_index = i
                     break
+            
+            if clicked_clip_index != -1:
+                # Handle Clip Click
+                if self.active_tool == "SPLIT":
+                    self.handle_split(clicked_clip_index, click_x)
+                    return
+                elif self.active_tool == "DUPLICATE":
+                    self.handle_duplicate(clicked_clip_index)
+                    return
+                elif self.active_tool == "DELETE":
+                    self.handle_delete(clicked_clip_index)
+                    return
+                
+                # MOVE TOOL & COPY LOGIC
+                # Always emit selection on click
+                self.clip_selected.emit(clicked_clip_index)
+
+                self.dragging_clip_index = clicked_clip_index
+                self.drag_start_x = click_x
+                clip = self.clips[clicked_clip_index]
+                self.clip_initial_start_time = clip['start_time']
+                self.clip_initial_duration = clip['duration']
+                self.clip_initial_offset = clip['start_offset']
+                
+                # Check for handles
+                start_x = int(clip['start_time'] * self.pixels_per_second)
+                width = int(clip['duration'] * self.pixels_per_second)
+                end_x = start_x + width
+
+                if click_x < start_x + self.HANDLE_WIDTH:
+                    self.drag_mode = "TRIM_LEFT"
+                elif click_x > end_x - self.HANDLE_WIDTH:
+                    self.drag_mode = "TRIM_RIGHT"
+                else:
+                    self.drag_mode = "MOVE"
+                
+            else:
+                # Handle Empty Space Click
+                if self.active_tool == "MOVE":
+                    time = click_x / self.pixels_per_second
+                    snapped_time = self.get_snapped_time(time)
+                    self.paste_requested.emit(snapped_time)
+
+        elif event.button() == Qt.RightButton:
+            click_x = event.position().x()
+            
+            # Check if clicked on a clip
+            clicked_clip_index = -1
+            for i, clip in enumerate(self.clips):
+                start_x = int(clip['start_time'] * self.pixels_per_second)
+                width = int(clip['duration'] * self.pixels_per_second)
+                end_x = start_x + width
+                
+                if start_x <= click_x <= end_x:
+                    clicked_clip_index = i
+                    break
+            
+            if clicked_clip_index != -1:
+                self.handle_delete(clicked_clip_index)
 
     def mouseMoveEvent(self, event):
         current_x = event.position().x()
@@ -142,6 +202,12 @@ class TrackLane(QFrame):
             if self.drag_mode == "MOVE":
                 new_start_time = self.clip_initial_start_time + delta_time
                 if new_start_time < 0: new_start_time = 0
+                
+                # Snapping Logic
+                new_start_time = self.get_snapped_time(new_start_time)
+
+                clip['start_time'] = new_start_time
+
                 clip['start_time'] = new_start_time
                 
             elif self.drag_mode == "TRIM_LEFT":
@@ -238,7 +304,7 @@ class TrackLane(QFrame):
         # Draw Clips
         mid_y = self.height() / 2 
         
-        for clip in self.clips:
+        for i, clip in enumerate(self.clips):
             start_x = int(clip['start_time'] * self.pixels_per_second)
             width = int(clip['duration'] * self.pixels_per_second)
             
@@ -247,12 +313,27 @@ class TrackLane(QFrame):
             clip_rect = QRect(start_x, 1, width, self.height() - 2)
             
             painter.setBrush(QBrush(QColor(30, 30, 40))) 
-            painter.setPen(QColor(clip['color']))        
+            
+            # Determine Color (Highlight if selected)
+            base_color = QColor(clip['color'])
+            if i == self.selected_clip_index:
+                painter.setPen(base_color.lighter(150)) # Lighter border
+                # Optional: Fill can be lighter too if desired, but Pen is safer
+                # Let's make the fill slightly lighter or just the border
+                # User asked: "just make its colors lighter"
+                # This could mean the waveform or the border.
+                # Let's lighten the pen (border) and maybe the waveform slightly
+                # But here we are drawing the rect.
+            else:
+                painter.setPen(base_color)        
+            
             painter.drawRoundedRect(clip_rect, 6, 6) # Rounded corners
 
             # DRAW WAVEFORM
             if clip['waveform'] is not None:
                 wave_color = QColor(clip['color'])
+                if i == self.selected_clip_index:
+                    wave_color = wave_color.lighter(130) # Lighten waveform too
                 
                 # Fill Color
                 fill_color = QColor(wave_color)
@@ -339,37 +420,7 @@ class TrackLane(QFrame):
         painter.drawLine(playhead_int, 0, playhead_int, self.height())
 
     def contextMenuEvent(self, event):
-        from PySide6.QtWidgets import QMenu
-        from PySide6.QtGui import QAction
-        
-        click_x = event.pos().x()
-        
-        # Check if clicked on a clip
-        clicked_clip_index = -1
-        for i, clip in enumerate(self.clips):
-            start_x = int(clip['start_time'] * self.pixels_per_second)
-            width = int(clip['duration'] * self.pixels_per_second)
-            end_x = start_x + width
-            
-            if start_x <= click_x <= end_x:
-                clicked_clip_index = i
-                break
-        
-        if clicked_clip_index != -1:
-            menu = QMenu(self)
-            split_action = QAction("Split Clip", self)
-            split_action.triggered.connect(lambda: self.handle_split(clicked_clip_index, click_x))
-            menu.addAction(split_action)
-            
-            duplicate_action = QAction("Duplicate Clip", self)
-            duplicate_action.triggered.connect(lambda: self.handle_duplicate(clicked_clip_index))
-            menu.addAction(duplicate_action)
-            
-            delete_action = QAction("Delete Clip", self)
-            delete_action.triggered.connect(lambda: self.handle_delete(clicked_clip_index))
-            menu.addAction(delete_action)
-            
-            menu.exec(event.globalPos())
+        pass # Disable context menu
 
     def handle_split(self, clip_index, click_x):
         split_time = click_x / self.pixels_per_second
