@@ -35,6 +35,10 @@ class MainWindow(QMainWindow):
         self.ui_timer.interval = 30 # 30ms refresh rate
         self.ui_timer.timeout.connect(self.update_ui)
 
+        self.scroll_timer = QTimer()
+        self.scroll_timer.setInterval(30)
+        self.scroll_timer.timeout.connect(self.check_edge_scroll)
+
         # UI SETUP
         self.lanes = [] 
         main_widget = QWidget()
@@ -53,6 +57,7 @@ class MainWindow(QMainWindow):
         self.undo_stack.stack_changed.connect(self.update_dirty_state)
 
         self.confirm_delete = True
+        self.edit_cursor_time = 0.0
         
         # Global Shortcuts
         self.shortcut_play = QShortcut(QKeySequence(Qt.Key_Space), self)
@@ -82,6 +87,20 @@ class MainWindow(QMainWindow):
         self.shortcut_save_as.activated.connect(self.on_save_project_as)
         self.shortcut_save_as.setContext(Qt.WindowShortcut)
 
+        # Zoom Shortcuts
+        self.shortcut_zoom_in = QShortcut(QKeySequence.ZoomIn, self)
+        self.shortcut_zoom_in.activated.connect(self.zoom_in_step)
+        self.shortcut_zoom_in.setContext(Qt.WindowShortcut)
+
+        # Handle Ctrl+= as well manually if ZoomIn doesn't cover it on some platforms
+        self.shortcut_zoom_in_alt = QShortcut(QKeySequence("Ctrl+="), self)
+        self.shortcut_zoom_in_alt.activated.connect(self.zoom_in_step)
+        self.shortcut_zoom_in_alt.setContext(Qt.WindowShortcut)
+
+        self.shortcut_zoom_out = QShortcut(QKeySequence.ZoomOut, self)
+        self.shortcut_zoom_out.activated.connect(self.zoom_out_step)
+        self.shortcut_zoom_out.setContext(Qt.WindowShortcut)
+
     def setup_ribbon(self):
         self.ribbon = Ribbon()
         self.ribbon.new_clicked.connect(self.on_new_project)
@@ -104,12 +123,6 @@ class MainWindow(QMainWindow):
 
     def on_tool_changed(self, tool_name):
         self.track_manager.set_active_tool(tool_name)
-
-    def on_bpm_changed(self, bpm):
-        self.audio.set_bpm(bpm)
-        self.timeline.set_bpm(bpm)
-        self.track_container.set_bpm(bpm)
-        self.update_dirty_state()
 
     def setup_workspace(self):
         splitter = QSplitter(Qt.Horizontal)
@@ -165,6 +178,8 @@ class MainWindow(QMainWindow):
         self.timeline.set_bpm(self.audio.bpm)
         self.timeline.position_changed.connect(self.user_seek)
         self.timeline.zoom_request.connect(self.perform_zoom)
+        self.timeline.drag_started.connect(self.handle_drag_started)
+        self.timeline.drag_finished.connect(self.handle_drag_finished)
         self.timeline_scroll = QScrollArea()
         self.timeline_scroll.setWidgetResizable(True)
         self.timeline_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -222,7 +237,37 @@ class MainWindow(QMainWindow):
         # Connect Loading Signals
         self.track_manager.loading_started.connect(lambda: self.ribbon.show_loading("Loading Project..."))
         self.track_manager.loading_progress.connect(self.ribbon.update_loading)
-        self.track_manager.loading_finished.connect(self.ribbon.hide_loading)
+        self.track_manager.loading_finished.connect(self.on_project_loaded)
+        self.track_manager.status_update.connect(self.ribbon.set_status)
+
+    def on_project_loaded(self):
+        self.ribbon.hide_loading()
+        self.zoom_to_fit()
+        
+    def zoom_to_fit(self):
+        # Calculate max duration from tracks
+        max_duration = 0
+        for track in self.audio.tracks:
+            for clip in track.clips:
+                end = clip.start_time + clip.duration
+                if end > max_duration: max_duration = end
+        
+        if max_duration <= 0: max_duration = 60 # Default if empty
+        
+        # Get available width
+        available_width = self.right_scroll.viewport().width() - 50 # padding
+        if available_width <= 0: available_width = 800
+        
+        # Calculate required pixels per second
+        required_pps = available_width / max_duration
+        
+        # Clamp
+        required_pps = max(1.0, min(1000.0, required_pps))
+        
+        # Apply
+        self.timeline.set_zoom(required_pps)
+        self.update_zoom(required_pps)
+        self.right_scroll.horizontalScrollBar().setValue(0)
 
 
     def sync_scrollbars(self):
@@ -248,7 +293,7 @@ class MainWindow(QMainWindow):
         # Update playhead position visually
         current_time = self.audio.get_playhead_time()
         x_pixel = int(current_time * px_per_sec)
-        self.update_playhead_visuals(x_pixel)
+        self.update_playhead_visuals(x_pixel, scroll_to_view=False)
 
     def update_global_duration(self):
         self.track_manager.update_global_duration()
@@ -260,12 +305,19 @@ class MainWindow(QMainWindow):
 
     def undo_action(self):
         self.undo_stack.undo()
+        self.ribbon.set_status("Undo Performed")
 
     def redo_action(self):
         self.undo_stack.redo()
+        self.ribbon.set_status("Redo Performed")
 
     def update_undo_redo_buttons(self):
-        self.ribbon.update_undo_redo_state(self.undo_stack.can_undo(), self.undo_stack.can_redo())
+        can_undo = self.undo_stack.can_undo()
+        can_redo = self.undo_stack.can_redo()
+        self.ribbon.update_undo_redo_state(can_undo, can_redo)
+        
+        # Heuristic feedback
+        if can_undo: self.ribbon.set_status("Action Performed")
 
 
 
@@ -274,6 +326,10 @@ class MainWindow(QMainWindow):
         if self.audio.is_playing:
             self.pause_playback()
         else:
+            # If at end (rough check), restart from cursor or 0
+            # if self.audio.get_playhead_time() >= self.timeline.duration:
+            #    self.audio.playhead = 0
+            
             self.audio.start_playback()
             self.ribbon.set_play_state(True)
             self.ui_timer.start()
@@ -290,15 +346,34 @@ class MainWindow(QMainWindow):
         self.ribbon.set_play_state(False)
         self.ui_timer.stop()
 
-        self.update_playhead_visuals(0)
-        self.right_scroll.horizontalScrollBar().setValue(0)
+        # SNAP BACK TO CURSOR
+        cursor_x_pixels = int(getattr(self, 'edit_cursor_time', 0.0) * self.timeline.pixels_per_second)
+        self.audio.set_playhead(cursor_x_pixels, px_per_second=self.timeline.pixels_per_second)
+
+        self.update_playhead_visuals(cursor_x_pixels, scroll_to_view=False)
+        # self.right_scroll.horizontalScrollBar().setValue(0) # Remove reset to 0
+
 
     def user_seek(self, x_pixels):
+        # Check if we should clamp to viewport (if dragging)
+        if hasattr(self.timeline, 'is_dragging') and self.timeline.is_dragging:
+             viewport_start = self.right_scroll.horizontalScrollBar().value()
+             viewport_end = viewport_start + self.right_scroll.viewport().width()
+             x_pixels = max(viewport_start, min(x_pixels, viewport_end))
+
         # Convert pixels to time using current zoom
         time_sec = x_pixels / self.timeline.pixels_per_second
         
+        # KEY CHANGE: User seek primarily sets the EDIT CURSOR
+        self.edit_cursor_time = time_sec
+        self.timeline.set_cursor(x_pixels)
+        
+        # If playing, we might want to scrub (move playhead too)
+        # Or if stopped, we want playhead to match cursor
+        # For now, let's keep them synced on seek for standard behavior
         self.audio.set_playhead(x_pixels, px_per_second=self.timeline.pixels_per_second)
-        self.update_playhead_visuals(x_pixels)
+        self.update_playhead_visuals(x_pixels, scroll_to_view=False)
+
 
     def update_ui(self):
         current_time = self.audio.get_playhead_time()
@@ -308,14 +383,63 @@ class MainWindow(QMainWindow):
              self.update_global_duration()
              
         x_pixel = int(current_time * self.timeline.pixels_per_second)
-        self.update_playhead_visuals(x_pixel)
+        self.update_playhead_visuals(x_pixel, scroll_to_view=True)
 
-    def update_playhead_visuals(self, x):
+    def update_playhead_visuals(self, x, scroll_to_view=False):
         self.timeline.set_playhead(x)
         self.track_manager.update_playhead_visuals(x)
             
-        if x > self.right_scroll.horizontalScrollBar().value() + self.right_scroll.viewport().width() - 50:
-             self.right_scroll.horizontalScrollBar().setValue(x - 50)
+        if scroll_to_view:
+             viewport_width = self.right_scroll.viewport().width()
+             current_scroll = self.right_scroll.horizontalScrollBar().value()
+             
+             # "Push" logic: When playhead hits 3/4 of the view, scroll to keep it there
+             threshold_offset = viewport_width * 0.75
+             
+             # Logic: If playhead is to the right of the threshold,
+             # update scroll so that playhead stays at that relative position.
+             
+             if x > current_scroll + threshold_offset:
+                 target_scroll = int(x - threshold_offset)
+                 self.right_scroll.horizontalScrollBar().setValue(target_scroll)
+
+    def zoom_in_step(self):
+        self.perform_zoom_step(1)
+
+    def zoom_out_step(self):
+        self.perform_zoom_step(-1)
+
+    def perform_zoom_step(self, direction):
+        # Zoom to center of viewport
+        viewport_width = self.right_scroll.viewport().width()
+        center_x_screen = viewport_width / 2
+        
+        current_scroll = self.right_scroll.horizontalScrollBar().value()
+        current_zoom = self.timeline.pixels_per_second
+        
+        # Calculate time at center
+        absolute_x = current_scroll + center_x_screen
+        time_at_center = absolute_x / current_zoom
+        
+        # Calculate new zoom
+        if direction > 0:
+            new_zoom = current_zoom * 1.5
+        else:
+            new_zoom = current_zoom / 1.5
+        
+        new_zoom = max(1.0, min(1000.0, new_zoom))
+        
+        if new_zoom == current_zoom: return
+
+        # Apply new zoom
+        self.timeline.set_zoom(new_zoom)
+        self.update_zoom(new_zoom)
+        
+        # Calculate new scroll to keep time_at_center at center_x_screen
+        new_absolute_x = time_at_center * new_zoom
+        new_scroll = int(new_absolute_x - center_x_screen)
+        
+        self.right_scroll.horizontalScrollBar().setValue(new_scroll)
 
     def handle_timeline_zoom(self, delta, global_pos):
         self.perform_zoom(delta, global_pos)
@@ -351,6 +475,56 @@ class MainWindow(QMainWindow):
         new_scroll = int(new_absolute_x - mouse_x_screen)
         
         self.right_scroll.horizontalScrollBar().setValue(new_scroll)
+
+    def handle_drag_started(self):
+        self.scroll_timer.start()
+
+    def handle_drag_finished(self):
+        self.scroll_timer.stop()
+
+    def check_edge_scroll(self):
+        # Determine global mouse pos
+        global_mouse = self.cursor().pos()
+        
+        # Map to timeline viewport
+        viewport = self.timeline_scroll.viewport()
+        mouse_pos = viewport.mapFromGlobal(global_mouse)
+        
+        # Define areas
+        scroll_margin = 50
+        scroll_step = 20
+        
+        current_scroll = self.right_scroll.horizontalScrollBar().value()
+        viewport_width = viewport.width()
+        
+        new_scroll = current_scroll
+        
+        # Check Right Edge
+        if mouse_pos.x() > viewport_width - scroll_margin:
+            # Scroll Right
+            new_scroll += scroll_step
+            
+        # Check Left Edge (of the track container viewport)
+        elif mouse_pos.x() < scroll_margin:
+            # Scroll Left
+            new_scroll -= scroll_step
+        
+        if new_scroll != current_scroll:
+            new_scroll = max(0, new_scroll)
+            self.right_scroll.horizontalScrollBar().setValue(new_scroll)
+            
+            # Update Playhead to match new position under mouse
+            # We want the playhead to stay under the mouse physically, 
+            # which means its logical time advances as we scroll.
+            
+            # Recalculate local x in the new scrolled context
+            # New absolute pixel = new_scroll + mouse_pos.x()
+            new_absolute_x = new_scroll + mouse_pos.x()
+            new_absolute_x = max(0, new_absolute_x)
+            
+            # Signal user seek
+            self.user_seek(new_absolute_x)
+
 
     def wheelEvent(self, event):
         if event.modifiers() & Qt.ControlModifier:

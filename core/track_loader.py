@@ -1,6 +1,7 @@
 import numpy as np
 import soundfile as sf
 import scipy.signal
+import os
 from PySide6.QtCore import QThread, Signal
 from core.models import AudioTrackData 
 
@@ -49,7 +50,7 @@ class TrackLoader(QThread):
 
             # Create the Data Object
             track_obj = AudioTrackData(
-                name=self.file_path,
+                name=os.path.basename(self.file_path),
                 file_path=self.file_path,
                 data=data.astype('float32'),
                 sample_rate=self.target_sr

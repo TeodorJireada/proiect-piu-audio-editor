@@ -1,6 +1,6 @@
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QPushButton, QButtonGroup, QProgressBar, QLabel, QSpacerItem, QSizePolicy, QToolButton, QDialog, QColorDialog, QSpinBox, QCheckBox
-from PySide6.QtCore import Signal, QSize
-from PySide6.QtGui import QIcon
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QPushButton, QButtonGroup, QProgressBar, QLabel, QSpacerItem, QSizePolicy, QToolButton, QDialog, QColorDialog, QSpinBox, QCheckBox, QGridLayout
+from PySide6.QtCore import Signal, QSize, Qt, QTimer
+from PySide6.QtGui import QIcon, QFontMetrics
 
 class Ribbon(QFrame):
     new_clicked = Signal()
@@ -22,12 +22,34 @@ class Ribbon(QFrame):
         super().__init__()
         self.setObjectName("Ribbon")
         self.setFixedHeight(60)
+        
+        # Status Timer to reset message
+        self.status_timer = QTimer(self)
+        self.status_timer.setSingleShot(True)
+        self.status_timer.timeout.connect(self.reset_status)
+        
         self.setup_ui()
 
     def setup_ui(self):
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 0, 10, 0) # Add margins
+        main_layout = QGridLayout(self)
+        main_layout.setContentsMargins(10, 0, 10, 0)
         
+        # Define Containers
+        left_container = QFrame()
+        left_layout = QHBoxLayout(left_container)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setAlignment(Qt.AlignLeft)
+        
+        center_container = QFrame()
+        center_layout = QHBoxLayout(center_container)
+        center_layout.setContentsMargins(0, 0, 0, 0)
+        center_layout.setAlignment(Qt.AlignCenter)
+        
+        right_container = QFrame()
+        right_layout = QHBoxLayout(right_container)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setAlignment(Qt.AlignRight)
+
         # Helper to create text buttons
         def create_text_btn(text, tooltip):
             btn = QPushButton(text)
@@ -46,34 +68,26 @@ class Ribbon(QFrame):
             btn.setFlat(True)
             return btn
 
-        # --- File Group ---
+        # --- LEFT GROUP ---
         btn_new = create_text_btn("New", "New Project")
         btn_new.clicked.connect(self.new_clicked.emit)
-        layout.addWidget(btn_new)
+        left_layout.addWidget(btn_new)
 
         btn_open = create_text_btn("Open", "Open Project")
         btn_open.clicked.connect(self.open_clicked.emit)
-        layout.addWidget(btn_open)
+        left_layout.addWidget(btn_open)
 
-        # Save (Icon + Text or just Icon? User said remove current save btn. 
-        # But implies integrating it. I'll make it consistent with New/Open for now, 
-        # or stick to Icon if I have it. Let's use Text to match others or Icon? 
-        # 'Check assets/icons': we have save.svg.
-        # Let's use the icon for Save since we have it, but maybe add text? 
-        # Or just keep it simple. Mixed is okay. 
-        # User said "remove current save button... integrate them...". 
-        # I will use text for all "File" operations for consistency.)
         btn_save = create_text_btn("Save", "Save Project (Ctrl+S)")
         btn_save.clicked.connect(self.save_clicked.emit)
-        layout.addWidget(btn_save)
+        left_layout.addWidget(btn_save)
 
         btn_export = create_text_btn("Export", "Export Audio (WAV)")
         btn_export.clicked.connect(self.export_clicked.emit)
-        layout.addWidget(btn_export)
+        left_layout.addWidget(btn_export)
 
-        self._add_separator(layout)
+        self._add_separator(left_layout)
         
-        # --- View Group ---
+        # Theme
         from PySide6.QtWidgets import QMenu
         from PySide6.QtGui import QAction
         
@@ -89,11 +103,32 @@ class Ribbon(QFrame):
         theme_menu.addAction(a_hc)
         
         btn_theme.setMenu(theme_menu)
-        layout.addWidget(btn_theme)
+        left_layout.addWidget(btn_theme)
+        
+        
+        # --- CENTER GROUP ---
+        
+        # BPM
+        lbl_bpm = QLabel("BPM:")
+        self.spin_bpm = QSpinBox()
+        self.spin_bpm.setRange(20, 300)
+        self.spin_bpm.setValue(120)
+        self.spin_bpm.setFixedWidth(60)
+        self.spin_bpm.valueChanged.connect(self.bpm_changed.emit)
+        
+        center_layout.addWidget(lbl_bpm)
+        center_layout.addWidget(self.spin_bpm)
+        
+        # Snap
+        self.chk_snap = QCheckBox("Snap")
+        self.chk_snap.setChecked(True) # Default ON
+        self.chk_snap.toggled.connect(self.snap_toggled.emit)
+        center_layout.addSpacing(10)
+        center_layout.addWidget(self.chk_snap)
+        
+        self._add_separator(center_layout)
 
-        self._add_separator(layout)
-
-        # --- Transport Controls ---
+        # Transport
         self.btn_undo = create_icon_btn("undo", "Undo (Ctrl+Z)")
         self.btn_undo.clicked.connect(self.undo_clicked.emit)
         self.btn_undo.setEnabled(False)
@@ -108,13 +143,12 @@ class Ribbon(QFrame):
         self.btn_play = create_icon_btn("play", "Play (Space)")
         self.btn_play.clicked.connect(self.play_clicked.emit)
 
-        # Loop Toggle
+        # Loop
         self.btn_loop = QPushButton("Loop")
         self.btn_loop.setCheckable(True)
-        self.btn_loop.setChecked(True) # Default ON
+        self.btn_loop.setChecked(True)
         self.btn_loop.clicked.connect(lambda c: self.loop_toggled.emit(c))
         self.btn_loop.setFixedHeight(30)
-        # Style for active state
         self.btn_loop.setStyleSheet("""
             QPushButton:checked {
                 background-color: #4466aa;
@@ -123,40 +157,13 @@ class Ribbon(QFrame):
             }
         """)
 
-        layout.addWidget(self.btn_undo)
-        layout.addWidget(self.btn_redo)
-        layout.addWidget(btn_stop)
-        layout.addWidget(self.btn_play)
-        layout.addWidget(self.btn_loop)
+        center_layout.addWidget(self.btn_undo)
+        center_layout.addWidget(self.btn_redo)
+        center_layout.addWidget(btn_stop)
+        center_layout.addWidget(self.btn_play)
+        center_layout.addWidget(self.btn_loop)
         
-        # Separator
-        self._add_separator(layout)
-        
-        # --- BPM Control ---
-        bpm_container = QFrame()
-        bpm_layout = QHBoxLayout(bpm_container)
-        bpm_layout.setContentsMargins(5, 5, 5, 5)
-        
-        lbl_bpm = QLabel("BPM:")
-        self.spin_bpm = QSpinBox()
-        self.spin_bpm.setRange(20, 300)
-        self.spin_bpm.setValue(120)
-        self.spin_bpm.setFixedWidth(60)
-        self.spin_bpm.valueChanged.connect(self.bpm_changed.emit)
-        
-        bpm_layout.addWidget(lbl_bpm)
-        bpm_layout.addWidget(self.spin_bpm)
-        
-        # Snap Checkbox
-        self.chk_snap = QCheckBox("Snap")
-        self.chk_snap.setChecked(True) # Default ON
-        self.chk_snap.toggled.connect(self.snap_toggled.emit)
-        bpm_layout.addSpacing(10)
-        bpm_layout.addWidget(self.chk_snap)
-        
-        layout.addWidget(bpm_container)
-
-        self._add_separator(layout)
+        self._add_separator(center_layout)
 
         # Tools
         self.tool_group = QButtonGroup(self)
@@ -178,37 +185,50 @@ class Ribbon(QFrame):
             btn.setToolTip(tooltip)
             btn.setObjectName("ToolButton")
             btn.setCheckable(True)
-            # Store tool name in property for retrieval
             btn.setProperty("tool_name", name.upper())
             
             if name == "Move":
                 btn.setChecked(True)
                 
             self.tool_group.addButton(btn)
-            layout.addWidget(btn)
+            center_layout.addWidget(btn)
 
-        # Loading Indicator
+
+        # --- RIGHT GROUP ---
+        # Loading Indicator (Right side)
         self.loading_bar = QProgressBar()
         self.loading_bar.setRange(0, 100)
         self.loading_bar.setValue(0)
         self.loading_bar.setFixedWidth(200)
-        self.loading_bar.setVisible(False)
+        self.loading_bar.setFormat(" STATUS: READY")
+        self.loading_bar.setVisible(True) # Always visible
         self.loading_bar.setStyleSheet("""
             QProgressBar {
-                border: 1px solid #444;
+                border: 2px solid #555;
                 border-radius: 4px;
-                text-align: center;
-                background-color: #222;
-                color: white;
+                text-align: left; /* Left align */
+                background-color: #111;
+                color: #88ccff;
+                font-family: monospace;
+                font-weight: bold;
             }
             QProgressBar::chunk {
                 background-color: #4466aa;
             }
         """)
-        layout.addWidget(self.loading_bar)
+        right_layout.addWidget(self.loading_bar)
 
-        layout.addStretch()
-    
+
+        # Add containers to Grid
+        main_layout.addWidget(left_container, 0, 0, Qt.AlignLeft)
+        main_layout.addWidget(center_container, 0, 1, Qt.AlignCenter)
+        main_layout.addWidget(right_container, 0, 2, Qt.AlignRight)
+        
+        # Stretch factors
+        main_layout.setColumnStretch(0, 1)
+        main_layout.setColumnStretch(1, 0)
+        main_layout.setColumnStretch(2, 1)
+
     def _add_separator(self, layout):
         line = QFrame()
         line.setFrameShape(QFrame.VLine)
@@ -216,7 +236,7 @@ class Ribbon(QFrame):
         layout.addWidget(line)
     
     def show_loading(self, message="Loading..."):
-        self.loading_bar.setFormat(f"{message} %p%")
+        self.loading_bar.setFormat(f" {message} %p%")
         self.loading_bar.setValue(0)
         self.loading_bar.setVisible(True)
         
@@ -226,7 +246,25 @@ class Ribbon(QFrame):
             self.loading_bar.setValue(percent)
             
     def hide_loading(self):
-        self.loading_bar.setVisible(False)
+        # Reset to ready state instead of hiding
+        self.loading_bar.setValue(0)
+        self.loading_bar.setFormat(" STATUS: READY")
+
+    def set_status(self, message, timeout=3000):
+        # Ellipsize text if too long
+        metrics = QFontMetrics(self.loading_bar.font())
+        prefix = " "
+        prefix_width = metrics.horizontalAdvance(prefix)
+        # Subtract padding/borders
+        available = self.loading_bar.width() - 20 - prefix_width
+        
+        elided_message = metrics.elidedText(message, Qt.ElideRight, available)
+        
+        self.loading_bar.setFormat(prefix + elided_message)
+        self.status_timer.start(timeout)
+        
+    def reset_status(self):
+        self.loading_bar.setFormat(" STATUS: READY")
 
     def on_tool_clicked(self, btn):
         tool_name = btn.property("tool_name")

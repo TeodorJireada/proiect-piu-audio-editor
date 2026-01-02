@@ -5,18 +5,26 @@ from PySide6.QtWidgets import QWidget
 class TimelineRuler(QWidget):
     position_changed = Signal(int)
     zoom_request = Signal(float, object) # delta, global_pos
+    drag_started = Signal()
+    drag_finished = Signal()
 
     def __init__(self):
         super().__init__()
         self.setFixedHeight(30)
         self.setMinimumWidth(3000)
         self.playhead_x = 0
+        self.cursor_x = 0
         self.pixels_per_second = 10
         self.duration = 60
         self.bpm = 120
+        self.is_dragging = False
 
     def set_playhead(self, x):
         self.playhead_x = x
+        self.update()
+
+    def set_cursor(self, x):
+        self.cursor_x = x
         self.update()
 
     def set_zoom(self, px_per_sec):
@@ -40,15 +48,20 @@ class TimelineRuler(QWidget):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
+            self.is_dragging = True
+            self.drag_started.emit()
             x = max(0, event.pos().x())
             self.position_changed.emit(x)
-            self.set_playhead(x)
 
     def mouseMoveEvent(self, event):
         if event.buttons() & Qt.LeftButton:
             x = max(0, event.pos().x())
             self.position_changed.emit(x)
-            self.set_playhead(x)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.is_dragging = False
+            self.drag_finished.emit()
 
     def set_bpm(self, bpm):
         self.bpm = bpm
@@ -96,3 +109,12 @@ class TimelineRuler(QWidget):
         painter.setPen(QPen(QColor(255, 50, 50), 2))
         playhead_x_int = int(self.playhead_x)
         painter.drawLine(playhead_x_int, 0, playhead_x_int, 30)
+
+        # Draw Edit Cursor (Blue)
+        painter.setPen(QPen(QColor(100, 100, 255), 2))
+        cursor_x_int = int(self.cursor_x)
+        # Draw dotted line or different style? For now solid blue.
+        # Ensure it doesn't perfectly overlap if they are same?
+        # Playhead (Red) should be on top if playing.
+        if cursor_x_int != playhead_x_int:
+             painter.drawLine(cursor_x_int, 0, cursor_x_int, 30)

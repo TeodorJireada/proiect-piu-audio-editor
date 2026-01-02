@@ -1,6 +1,7 @@
 from PySide6.QtCore import Qt, QRect, Signal, QPointF
 from PySide6.QtGui import QColor, QPainter, QPen, QBrush, QPolygonF
 import numpy as np
+import os
 from PySide6.QtWidgets import QFrame
 
 class TrackLane(QFrame):
@@ -207,8 +208,6 @@ class TrackLane(QFrame):
                 new_start_time = self.get_snapped_time(new_start_time)
 
                 clip['start_time'] = new_start_time
-
-                clip['start_time'] = new_start_time
                 
             elif self.drag_mode == "TRIM_LEFT":
                 
@@ -318,12 +317,6 @@ class TrackLane(QFrame):
             base_color = QColor(clip['color'])
             if i == self.selected_clip_index:
                 painter.setPen(base_color.lighter(150)) # Lighter border
-                # Optional: Fill can be lighter too if desired, but Pen is safer
-                # Let's make the fill slightly lighter or just the border
-                # User asked: "just make its colors lighter"
-                # This could mean the waveform or the border.
-                # Let's lighten the pen (border) and maybe the waveform slightly
-                # But here we are drawing the rect.
             else:
                 painter.setPen(base_color)        
             
@@ -361,8 +354,6 @@ class TrackLane(QFrame):
                 if draw_start_x < draw_end_x:
                      points_top = []
                      points_bottom = []
-                     mid_y = self.height() / 2
-                     
                      if clip.get('waveform') is not None:
                          waveform = clip['waveform']
                          
@@ -412,7 +403,8 @@ class TrackLane(QFrame):
 
             # Draw Clip Name Overlay
             painter.setPen(QColor(255, 255, 255))
-            painter.drawText(clip_rect.adjusted(5, 5, 0, 0), Qt.AlignLeft | Qt.AlignTop, clip['name'])
+            display_name = os.path.basename(clip['name'])
+            painter.drawText(clip_rect.adjusted(5, 5, 0, 0), Qt.AlignLeft | Qt.AlignTop, display_name)
 
         # Draw Playhead
         painter.setPen(QPen(QColor(255, 50, 50, 180), 1))

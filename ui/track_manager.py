@@ -13,6 +13,7 @@ class TrackManager(QObject):
     loading_started = Signal()
     loading_progress = Signal(int, int) # current, total
     loading_finished = Signal()
+    status_update = Signal(str)
 
     def __init__(self, main_window, audio_engine, undo_stack, timeline, left_layout, right_layout, btn_add_track, track_container):
         super().__init__()
@@ -31,8 +32,6 @@ class TrackManager(QObject):
         self.pending_tracks = []
         self.loaded_count = 0
         self.current_tool = "MOVE"
-        self.temp_volumes = {} # Track index -> start volume
-        self.temp_pans = {}    # Track index -> start pan
         self.temp_volumes = {} # Track index -> start volume
         self.temp_pans = {}    # Track index -> start pan
         self.snap_enabled = False
@@ -150,7 +149,6 @@ class TrackManager(QObject):
         lane.clip_moved.connect(self.on_clip_moved)
         lane.clip_trimmed.connect(self.on_clip_trimmed)
         lane.clip_split.connect(self.on_clip_split)
-        lane.clip_duplicated.connect(self.on_clip_duplicated)
         lane.clip_duplicated.connect(self.on_clip_duplicated)
         lane.clip_deleted.connect(self.on_clip_deleted)
         lane.clip_selected.connect(self.on_clip_selected)
@@ -435,6 +433,7 @@ class TrackManager(QObject):
                     
                     cmd = SplitClipCommand(self, track_index, clip_index, split_time, split_offset)
                     self.undo_stack.push(cmd)
+                    self.status_update.emit("Split Clip")
 
     def on_clip_duplicated(self, clip_index, new_start_time):
         sender_lane = self.sender()
@@ -443,6 +442,7 @@ class TrackManager(QObject):
             
             cmd = DuplicateClipCommand(self, track_index, clip_index, new_start_time)
             self.undo_stack.push(cmd)
+            self.status_update.emit("Duplicated Clip")
 
     def on_clip_deleted(self, clip_index):
         sender_lane = self.sender()
@@ -451,6 +451,7 @@ class TrackManager(QObject):
             
             cmd = DeleteClipCommand(self, track_index, clip_index)
             self.undo_stack.push(cmd)
+            self.status_update.emit("Deleted Clip")
 
     def perform_move_clip(self, lane_index, clip_index, new_start):
         if 0 <= lane_index < len(self.lanes):
@@ -651,7 +652,6 @@ class TrackManager(QObject):
     def load_project(self, file_path):
         from core.project_manager import ProjectManager
         import numpy as np
-        import os # Added import for os module
 
         pm = ProjectManager()
         project_data = pm.parse_project_file(file_path)
@@ -772,7 +772,11 @@ class TrackManager(QObject):
         track = self.audio.tracks[lane_index]
         if 0 <= clip_index < len(track.clips):
             self.clipboard_clip = track.clips[clip_index]
-            print(f"Clip copied: {self.clipboard_clip.name}")
+            
+            # Sanitize name for display
+            display_name = os.path.basename(self.clipboard_clip.name)
+            self.status_update.emit(f"Copied Clip: {display_name}")
+
 
     def on_paste_requested(self, start_time):
         if not self.clipboard_clip: return
@@ -783,6 +787,7 @@ class TrackManager(QObject):
         
         cmd = PasteClipCommand(self, lane_index, self.clipboard_clip, start_time)
         self.undo_stack.push(cmd)
+        self.status_update.emit("Pasted Clip")
 
     def perform_paste_clip(self, lane_index, clip_data, start_time):
         # Create new AudioClip instance

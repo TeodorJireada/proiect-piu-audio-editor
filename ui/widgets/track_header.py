@@ -39,11 +39,6 @@ class ColorStrip(QFrame):
         
         for name, hex_code in colors.items():
             action = QAction(name, self)
-            # Create a small pixmap or icon for color? 
-            # For now, just text, maybe color the text or background?
-            # Standard QAction doesn't easily support colored background without styling the whole menu.
-            # We'll just stick to names for simplicity/consistency, user can try them.
-            
             action.triggered.connect(lambda checked=False, c=hex_code: self.handle_color_selection(c))
             menu.addAction(action)
             
