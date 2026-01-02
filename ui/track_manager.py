@@ -6,6 +6,11 @@ from ui.widgets.track_header import TrackHeader
 from ui.widgets.track_lane import TrackLane
 from core.track_loader import TrackLoader
 from core.commands import AddTrackCommand, DeleteTrackCommand, MoveClipCommand, TrimClipCommand, SplitClipCommand, DuplicateClipCommand, DeleteClipCommand, ChangeColorCommand, ToggleMuteCommand, ToggleSoloCommand, ChangeVolumeCommand, ChangePanCommand, PasteClipCommand
+from core.commands import AddTrackCommand, DeleteTrackCommand, MoveClipCommand, TrimClipCommand, SplitClipCommand, DuplicateClipCommand, DeleteClipCommand, ChangeColorCommand, ToggleMuteCommand, ToggleSoloCommand, ChangeVolumeCommand, ChangePanCommand, PasteClipCommand
+from ui.effects_window import EffectsWindow
+from core.effects.eq import EQ3Band
+from core.effects.delay import SimpleDelay
+from core.effects.distortion import Distortion
 
 from core.models import AudioClip
 
@@ -14,6 +19,7 @@ class TrackManager(QObject):
     loading_progress = Signal(int, int) # current, total
     loading_finished = Signal()
     status_update = Signal(str)
+    track_selected = Signal(object) # Emits AudioTrackData
 
     def __init__(self, main_window, audio_engine, undo_stack, timeline, left_layout, right_layout, btn_add_track, track_container):
         super().__init__()
@@ -34,6 +40,7 @@ class TrackManager(QObject):
         self.current_tool = "MOVE"
         self.temp_volumes = {} # Track index -> start volume
         self.temp_pans = {}    # Track index -> start pan
+        self.fx_windows = {}   # Track object -> EffectsWindow
         self.snap_enabled = False
         self.clipboard_clip = None # Stores data of copied clip
 
@@ -52,10 +59,6 @@ class TrackManager(QObject):
             lane.set_bpm(bpm)
 
     def scale_project_time(self, scale_factor):
-        """
-        Scales the start time of all clips by the given factor.
-        Used when BPM changes to maintain musical grid position.
-        """
         # Update Model
         for track in self.audio.tracks:
             for clip in track.clips:
@@ -130,14 +133,22 @@ class TrackManager(QObject):
         header.volume_changed.connect(self.handle_volume_change)
         header.slider_pressed.connect(self.handle_slider_press)
         header.volume_set.connect(self.handle_volume_set)
+        header.fx_requested.connect(lambda t=track_data: self.on_fx_requested(t))
+        header.fx_bypass_toggled.connect(lambda c, t=track_data: self.on_fx_bypass_toggled(t, c))
         
+        # Initialize FX count
+        header.update_fx_count(len(track_data.effects))
+        
+        # Connect Pan Signalsnged.connect(self.handle_pan_change)
         header.pan_changed.connect(self.handle_pan_change)
         header.dial_pressed.connect(self.handle_dial_press)
         header.pan_set.connect(self.handle_pan_set)
+        header.clicked.connect(lambda: self.on_track_header_clicked(header))
         
         # Set initial volume and pan
         header.set_volume(track_data.volume)
         header.set_pan(track_data.pan)
+        header.set_bypass(getattr(track_data, 'fx_bypass', False))
         
         # Create Lane with Waveform
         lane = TrackLane()
@@ -389,6 +400,16 @@ class TrackManager(QObject):
              
              self.main_window.ui_timer.start()
 
+    def on_fx_bypass_toggled(self, track_data, checked):
+        # print(f"DEBUG: on_fx_bypass_toggled track={track_data.name} checked={checked}")
+        if track_data in self.audio.tracks:
+            index = self.audio.tracks.index(track_data)
+            from core.commands import ToggleFXBypassCommand
+            cmd = ToggleFXBypassCommand(self, index, checked)
+            self.undo_stack.push(cmd)
+        else:
+            print(f"DEBUG: Track {track_data.name} not found in audio.tracks")
+
     def on_clip_moved(self, clip_index, old_start_time, new_start_time):
         sender_lane = self.sender()
         if sender_lane in self.lanes:
@@ -571,7 +592,7 @@ class TrackManager(QObject):
             # Update Audio Engine Data
             if 0 <= lane_index < len(self.audio.tracks):
                 track = self.audio.tracks[lane_index]
-                if 0 <= clip_index < len(track.clips):
+                if clip_index is not None and 0 <= clip_index < len(track.clips):
                     track.clips.pop(clip_index)
                     
                     # Update UI
@@ -590,6 +611,46 @@ class TrackManager(QObject):
                 self.refresh_lane(lane_index)
             
             self.update_global_duration()
+
+    def get_header_widget(self, track_index):
+        # 0-th item is probably valid, but our insertion logic uses index + 1
+        item = self.left_layout.itemAt(track_index + 1)
+        if item and item.widget():
+            return item.widget()
+        return None
+
+
+    def perform_toggle_fx_bypass(self, track_index, bypass_state):
+        # -1 for Master Track
+        if track_index == -1:
+             if hasattr(self.audio, 'master_track'):
+                 self.audio.master_track.fx_bypass = bypass_state
+                 if hasattr(self.main_window, 'master_track_widget'):
+                      self.main_window.master_track_widget.set_bypass(bypass_state)
+        elif 0 <= track_index < len(self.audio.tracks):
+             track = self.audio.tracks[track_index]
+             track.fx_bypass = bypass_state
+             
+             # UI Update
+             header = self.get_header_widget(track_index)
+             if header:
+                 header.set_bypass(bypass_state)
+
+    def open_master_fx_window(self, master_track):
+        # Unique key for Master Track
+        window_key = "MASTER"
+        
+        if window_key in self.fx_windows:
+            window = self.fx_windows[window_key]
+            window.show()
+            window.raise_()
+            window.activateWindow()
+        else:
+            from ui.effects_window import EffectsWindow
+            window = EffectsWindow(master_track, self.undo_stack, self.main_window)
+            window.setWindowTitle("Master Track Effects")
+            self.fx_windows[window_key] = window
+            window.show()
 
     def refresh_lane(self, lane_index):
         if 0 <= lane_index < len(self.lanes):
@@ -629,6 +690,8 @@ class TrackManager(QObject):
         
         # Check playhead
         current_playhead = self.audio.get_playhead_time()
+        
+
         if current_playhead > max_duration:
             max_duration = current_playhead
         
@@ -665,6 +728,40 @@ class TrackManager(QObject):
             self.main_window.perform_bpm_change(bpm)
 
         self.clear_all_tracks()
+
+        # Load Master Track Settings if available
+        # Note: self.main_window must be available to update GUI
+        master_data = project_data.get("master")
+        if master_data and hasattr(self.main_window, 'master_track_widget'):
+            # Model
+            self.audio.master_track.volume = master_data.get("volume", 1.0)
+            self.audio.master_track.pan = master_data.get("pan", 0.0)
+            
+            # Effects
+            self.audio.master_track.effects.clear()
+            for fx_data in master_data.get("effects", []):
+                fx_type = fx_data.get("type")
+                # Basic factory - should be unified with TrackLoader
+                from core.effects import EQ3Band, SimpleDelay, Distortion
+                effect = None
+                if fx_type == "EQ3Band": effect = EQ3Band()
+                elif fx_type == "SimpleDelay": effect = SimpleDelay()
+                elif fx_type == "Distortion": effect = Distortion()
+                
+                if effect:
+                    effect.active = fx_data.get("active", True)
+                    effect.parameters = fx_data.get("parameters", {})
+                    self.audio.master_track.effects.append(effect)
+            
+            # GUI
+            try:
+                self.main_window.master_track_widget.blockSignals(True)
+                self.main_window.master_track_widget.slider_volume.setValue(int(self.audio.master_track.volume * 100))
+                self.main_window.master_track_widget.dial_pan.setValue(self.audio.master_track.pan * 100)
+                self.main_window.master_track_widget.update_fx_count(len(self.audio.master_track.effects))
+                self.main_window.master_track_widget.blockSignals(False)
+            except Exception as e:
+                print(f"Error updating master widget: {e}")
         
         tracks_list = project_data.get("tracks", [])
         total_tracks = len(tracks_list)
@@ -736,6 +833,29 @@ class TrackManager(QObject):
             track.pan = track_info.get("pan", 0.0)
             track.color = track_info.get("color", "#4466aa") # Load saved color
             
+            # Restore Effects
+            effects_data = track_info.get("effects", [])
+            for fx_data in effects_data:
+                fx_type = fx_data.get("type")
+                fx_active = fx_data.get("active", True)
+                fx_params = fx_data.get("parameters", {})
+                
+                effect = None
+                if fx_type == "EQ3Band":
+                    effect = EQ3Band()
+                elif fx_type == "SimpleDelay":
+                    effect = SimpleDelay()
+                elif fx_type == "Distortion":
+                    effect = Distortion()
+                    
+                if effect:
+                    effect.active = fx_active
+                    # Restore parameters
+                    for k, v in fx_params.items():
+                        if k in effect.parameters:
+                            effect.parameters[k] = v
+                    track.effects.append(effect)
+
             # Reconstruct Clips
             track.clips = []
             for clip_info in track_info.get("clips", []):
@@ -796,26 +916,73 @@ class TrackManager(QObject):
             start_time=start_time,
             start_offset=clip_data.start_offset,
             duration=clip_data.duration,
-            name=clip_data.name,
+            name=clip_data.name + " (Pasted)",
             waveform=clip_data.waveform
         )
         
+        return self.perform_add_clip_internal(lane_index, new_clip)
+
+    def perform_add_clip_internal(self, lane_index, new_clip):
         # Add to AudioEngine
-        track = self.audio.tracks[lane_index]
-        track.clips.append(new_clip)
-        new_clip_index = len(track.clips) - 1
+        if 0 <= lane_index < len(self.audio.tracks):
+            track = self.audio.tracks[lane_index]
+            track.clips.append(new_clip)
+            
+            # Add to UI
+            if 0 <= lane_index < len(self.lanes):
+                lane = self.lanes[lane_index]
+                lane.add_clip(
+                    new_clip.name,
+                    new_clip.start_time,
+                    new_clip.duration,
+                    new_clip.start_offset,
+                    getattr(track, "color", "#4466aa"),
+                    new_clip.waveform,
+                    new_clip.data,
+                    track.sample_rate
+                )
+            self.update_global_duration()
+            
+            return len(track.clips) - 1
+        return -1
+
+    def on_track_header_clicked(self, header):
+        layout_index = self.left_layout.indexOf(header)
+        if layout_index == -1: return
         
-        # Add to UI
-        lane = self.lanes[lane_index]
-        lane.add_clip(
-            new_clip.name,
-            new_clip.start_time,
-            new_clip.duration,
-            new_clip.start_offset,
-            getattr(track, "color", "#4466aa"),
-            new_clip.waveform,
-            new_clip.data,
-            track.sample_rate
-        )
+        track_index = layout_index - 1
+        if 0 <= track_index < len(self.audio.tracks):
+             track_data = self.audio.tracks[track_index]
+             self.track_selected.emit(track_data)
+             
+             # Also update Status
+             self.status_update.emit(f"Selected Track: {track_data.name}")
+
+    def on_fx_requested(self, track_data):
+        # specific window management
+        if track_data in self.fx_windows:
+            win = self.fx_windows[track_data]
+            win.show()
+            win.raise_()
+            win.activateWindow()
+        else:
+            win = EffectsWindow(track_data, self.undo_stack, self.main_window)
+            self.fx_windows[track_data] = win
+            
+            # Connect invalidation signal
+            win.rack.effects_changed.connect(lambda: self.update_track_fx_count(track_data))
+            
+            win.show()
+
+    def update_track_fx_count(self, track_data):
+        # Find index
+        try:
+            track_index = self.audio.tracks.index(track_data)
+        except ValueError:
+            return
         
-        return new_clip_index
+        item = self.left_layout.itemAt(track_index + 1)
+        if item and item.widget():
+            header = item.widget()
+            if isinstance(header, TrackHeader):
+                header.update_fx_count(len(track_data.effects))

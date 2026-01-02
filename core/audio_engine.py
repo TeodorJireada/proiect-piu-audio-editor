@@ -14,6 +14,9 @@ class AudioEngine(QObject):
         
         print(f"Audio Engine initialized at: {self.sample_rate} Hz")
 
+        from core.models import AudioTrackData
+        self.master_track = AudioTrackData("Master", None, None, self.sample_rate)
+
         self.tracks = [] 
         self.is_playing = False
         self.stream = None
@@ -127,6 +130,9 @@ class AudioEngine(QObject):
             else:
                 if track.is_muted: continue
 
+            # 1. Sum Clips into Track Buffer
+            track_buffer = np.zeros((num_frames, 2), dtype='float32')
+            
             for clip in track.clips:
                 clip_start_sample = int(clip.start_time * self.sample_rate)
                 clip_end_sample = clip_start_sample + int(clip.duration * self.sample_rate)
@@ -148,17 +154,48 @@ class AudioEngine(QObject):
                     if offset_in_source_data < source_len:
                         read_len = min(overlap_len, source_len - offset_in_source_data)
                         
-                        # Calculate gains
-                        pan = track.pan
-                        left_gain = 1.0 if pan <= 0 else (1.0 - pan)
-                        right_gain = 1.0 if pan >= 0 else (1.0 + pan)
-                        
-                        # Apply volume and pan
-                        # efficient numpy broadcasting: (N, 2) * (1, 2)
-                        gains = np.array([left_gain, right_gain], dtype='float32') * track.volume
-                        
-                        mix_buffer[buffer_offset : buffer_offset + read_len] += \
-                            clip.data[offset_in_source_data : offset_in_source_data + read_len] * gains
+                        # Add raw clip audio to track buffer
+                        track_buffer[buffer_offset : buffer_offset + read_len] += \
+                            clip.data[offset_in_source_data : offset_in_source_data + read_len]
+            
+            # 2. Process Effects Chain
+            if hasattr(track, 'effects') and not getattr(track, 'fx_bypass', False):
+                for effect in track.effects:
+                    if effect.active:
+                        # Process in-place-ish (depends on effect implementation)
+                        track_buffer = effect.process(track_buffer, self.sample_rate)
+
+            # 3. Apply Track Volume & Pan
+            pan = track.pan
+            left_gain = 1.0 if pan <= 0 else (1.0 - pan)
+            right_gain = 1.0 if pan >= 0 else (1.0 + pan)
+            
+            gains = np.array([left_gain, right_gain], dtype='float32') * track.volume
+            
+            # 4. Mix to Master
+            mix_buffer += track_buffer * gains
+            
+        # --- MASTER TRACK PROCESSING ---
+        if hasattr(self, 'master_track'):
+             # 1. Effects
+             if not getattr(self.master_track, 'fx_bypass', False):
+                 for effect in self.master_track.effects:
+                     if effect.active:
+                         mix_buffer = effect.process(mix_buffer, self.sample_rate)
+             
+             # 2. Volume
+             mix_buffer *= self.master_track.volume
+             
+             # 3. Pan
+             pan = self.master_track.pan
+             left_gain = 1.0 if pan <= 0 else (1.0 - pan)
+             right_gain = 1.0 if pan >= 0 else (1.0 + pan)
+             
+             master_gains = np.array([left_gain, right_gain], dtype='float32') # Constant power approximation would be better but keeping linear for now
+             
+             mix_buffer[:, 0] *= master_gains[0]
+             mix_buffer[:, 1] *= master_gains[1]
+        # -------------------------------
         
         return mix_buffer
 

@@ -11,8 +11,24 @@ class ProjectManager:
         project_data = {
             "version": "1.0",
             "bpm": getattr(audio_engine, "bpm", 120),
+            "master": {
+                "volume": getattr(audio_engine.master_track, "volume", 1.0),
+                "pan": getattr(audio_engine.master_track, "pan", 0.0),
+                "fx_bypass": getattr(audio_engine.master_track, "fx_bypass", False),
+                "effects": []
+            },
             "tracks": []
         }
+        
+        # Serialize Master Effects
+        if hasattr(audio_engine.master_track, 'effects'):
+            for effect in audio_engine.master_track.effects:
+                effect_data = {
+                    "type": effect.__class__.__name__,
+                    "active": effect.active,
+                    "parameters": effect.parameters
+                }
+                project_data["master"]["effects"].append(effect_data)
 
         for track in audio_engine.tracks:
             track_data = {
@@ -22,9 +38,21 @@ class ProjectManager:
                 "is_soloed": track.is_soloed,
                 "volume": getattr(track, "volume", 1.0), 
                 "pan": getattr(track, "pan", 0.0),
+                "fx_bypass": getattr(track, "fx_bypass", False),
                 "color": getattr(track, "color", "#4466aa"), # Save color
+                "effects": [],
                 "clips": []
             }
+            
+            # Serialize Effects
+            if hasattr(track, 'effects'):
+                for effect in track.effects:
+                    effect_data = {
+                        "type": effect.__class__.__name__,
+                        "active": effect.active,
+                        "parameters": effect.parameters
+                    }
+                    track_data["effects"].append(effect_data)
 
             for clip in track.clips:
                 clip_data = {

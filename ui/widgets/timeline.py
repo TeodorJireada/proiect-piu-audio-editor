@@ -91,6 +91,15 @@ class TimelineRuler(QWidget):
         # 4/4 assumption
         beats_total = int(self.duration / seconds_per_beat) + 1
         
+        # Calculate visible bars to decide on text visibility
+        visible_width = self.visibleRegion().boundingRect().width()
+        if visible_width == 0: visible_width = self.width() # Fallback
+        
+        pixels_per_bar = pixels_per_beat * 4
+        visible_bars_count = visible_width / pixels_per_bar if pixels_per_bar > 0 else 999
+        
+        show_bar_numbers = visible_bars_count <= 100
+
         for beat_idx in range(0, beats_total, beat_interval):
              x = int(beat_idx * pixels_per_beat)
              if x > self.width(): break
@@ -100,7 +109,8 @@ class TimelineRuler(QWidget):
              if is_bar_start:
                  height = 15
                  bar_num = (beat_idx // 4) + 1
-                 painter.drawText(x + 5, 15, str(bar_num))
+                 if show_bar_numbers:
+                     painter.drawText(x + 5, 15, str(bar_num))
              else:
                  height = 8
                  
@@ -113,8 +123,6 @@ class TimelineRuler(QWidget):
         # Draw Edit Cursor (Blue)
         painter.setPen(QPen(QColor(100, 100, 255), 2))
         cursor_x_int = int(self.cursor_x)
-        # Draw dotted line or different style? For now solid blue.
-        # Ensure it doesn't perfectly overlap if they are same?
-        # Playhead (Red) should be on top if playing.
+
         if cursor_x_int != playhead_x_int:
              painter.drawLine(cursor_x_int, 0, cursor_x_int, 30)

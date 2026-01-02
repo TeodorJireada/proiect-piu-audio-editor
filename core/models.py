@@ -16,6 +16,8 @@ class AudioTrackData:
         self.waveform = None
         self.is_muted = False
         self.is_soloed = False
+        self.effects = [] # List of AudioEffect objects
+        self.fx_bypass = False
         self.volume = 1.0
         self.pan = 0.0
         self.color = "#4466aa" # Default color

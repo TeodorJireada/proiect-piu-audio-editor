@@ -48,38 +48,7 @@ class ColorStrip(QFrame):
         self.update_color(color_hex)
         self.color_selected.emit(color_hex)
 
-class DraggableDial(QDial):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setMouseTracking(True)
-        self.last_y = 0
-        self.drag_sensitivity = 4 # Pixels per step
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self.last_y = event.y()
-            self.sliderPressed.emit()
-            event.accept()
-
-    def mouseMoveEvent(self, event):
-        if event.buttons() & Qt.LeftButton:
-            delta_y = self.last_y - event.y() 
-            # Up means positive change (Right/Increase)
-            # Down means negative change (Left/Decrease)
-            
-            if abs(delta_y) > 0:
-                # Direct mapping or sensitivity
-                # Let's try 1 unit per 'drag_sensitivity' pixels
-                 steps = int(delta_y / self.drag_sensitivity)
-                 if steps != 0:
-                     self.setValue(self.value() + steps)
-                     self.last_y = event.y()
-            event.accept()
-
-    def mouseReleaseEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self.sliderReleased.emit()
-            event.accept()
+from ui.widgets.knob import DraggableDial
 
 class TrackHeader(QFrame):
     mute_clicked = Signal()
@@ -94,6 +63,9 @@ class TrackHeader(QFrame):
     volume_changed = Signal(float) # Emitted on drag (real-time)
     volume_set = Signal(float)     # Emitted on release (undo)
     color_changed = Signal(str) # New Signal
+    clicked = Signal()
+    fx_requested = Signal() # New Signal
+    fx_bypass_toggled = Signal(bool)
 
     def __init__(self, name, color_hex):
         super().__init__()
@@ -142,6 +114,31 @@ class TrackHeader(QFrame):
         self.btn_solo.setFixedSize(24, 24)
         self.btn_solo.clicked.connect(self.toggle_solo_visual)
         
+        # FX Button
+        self.btn_fx = QPushButton("FX")
+        self.btn_fx.setCheckable(False)
+        self.btn_fx.setFixedSize(40, 20) # Made wider (30 -> 40)
+        self.btn_fx.setStyleSheet("""
+            QPushButton { background-color: #333; border: 1px solid #555; border-radius: 2px; font-size: 10px; }
+            QPushButton:hover { background-color: #444; }
+            QPushButton:pressed { background-color: #666; }
+        """)
+        self.btn_fx.clicked.connect(self.on_fx_clicked)
+        btn_layout.addWidget(self.btn_fx)
+
+        # FX Bypass
+        self.btn_fx_bypass = QPushButton("Ø")
+        self.btn_fx_bypass.setFixedSize(20, 20)
+        self.btn_fx_bypass.setCheckable(True)
+        self.btn_fx_bypass.setToolTip("Bypass All Effects")
+        self.btn_fx_bypass.setStyleSheet("""
+            QPushButton { background-color: #333; border: 1px solid #555; border-radius: 2px; color: #aaa; font-size: 10px; font-weight: bold; }
+            QPushButton:checked { background-color: #aa4444; color: #fff; border: 1px solid #cc5555; }
+            QPushButton:hover { background-color: #444; }
+        """)
+        self.btn_fx_bypass.clicked.connect(self.on_bypass_clicked)
+        btn_layout.addWidget(self.btn_fx_bypass)
+
         self.btn_delete = QPushButton("X")
         self.btn_delete.setObjectName("TrackDeleteButton")
         self.btn_delete.setFixedSize(24, 24)
@@ -153,7 +150,7 @@ class TrackHeader(QFrame):
         btn_layout.addStretch() # Push slider to right
         
         # Pan Dial
-        self.dial_pan = DraggableDial()
+        self.dial_pan = DraggableDial(default_value=0)
         self.dial_pan.setRange(-100, 100)
         self.dial_pan.setValue(0)
         self.dial_pan.setFixedSize(30, 30)
@@ -225,8 +222,6 @@ class TrackHeader(QFrame):
         self.volume_set.emit(volume)
 
     def set_volume(self, volume):
-        # Update slider without emitting valueChanged if possible, but blocking signals removes tooltip update
-        # So we block signals, set value, update tooltip manually
         self.slider_volume.blockSignals(True)
         val = int(volume * 100)
         self.slider_volume.setValue(val)
@@ -252,8 +247,37 @@ class TrackHeader(QFrame):
         self.dial_pan.setValue(val)
         
         text = "Center"
-        if pan < 0: text = f"Left {int(abs(pan)*100)}%"
-        elif pan > 0: text = f"Right {int(abs(pan)*100)}%"
         self.dial_pan.setToolTip(f"Pan: {text}")
         
         self.dial_pan.blockSignals(False)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit()
+            super().mousePressEvent(event)
+
+    def on_fx_clicked(self):
+        self.fx_requested.emit()
+
+    def on_bypass_clicked(self, checked):
+        self.fx_bypass_toggled.emit(checked)
+    
+    def set_bypass(self, bypassed):
+        self.btn_fx_bypass.setChecked(bypassed)
+
+    def update_fx_count(self, count):
+        if count > 0:
+            self.btn_fx.setText(f"FX ({count})")
+            # Optional: Highlight color if active effects?
+            self.btn_fx.setStyleSheet("""
+                QPushButton { background-color: #445566; border: 1px solid #667788; border-radius: 2px; font-size: 10px; }
+                QPushButton:hover { background-color: #556677; }
+                QPushButton:pressed { background-color: #334455; }
+            """)
+        else:
+            self.btn_fx.setText("FX")
+            self.btn_fx.setStyleSheet("""
+                QPushButton { background-color: #333; border: 1px solid #555; border-radius: 2px; font-size: 10px; }
+                QPushButton:hover { background-color: #444; }
+                QPushButton:pressed { background-color: #666; }
+            """)

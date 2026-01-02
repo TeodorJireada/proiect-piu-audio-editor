@@ -1,7 +1,7 @@
 import os
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, 
                                QHBoxLayout, QPushButton, QScrollArea, QSplitter, 
-                               QFrame, QFileDialog, QMessageBox, QCheckBox, QSizePolicy, QApplication)
+                               QFrame, QFileDialog, QMessageBox, QCheckBox, QSizePolicy, QApplication, QScrollBar)
 from PySide6.QtGui import QShortcut, QKeySequence
 from PySide6.QtCore import Qt, QTimer
 
@@ -57,7 +57,11 @@ class MainWindow(QMainWindow):
         self.undo_stack.stack_changed.connect(self.update_dirty_state)
 
         self.confirm_delete = True
+        self.confirm_delete = True
         self.edit_cursor_time = 0.0
+        
+        self.master_vol_at_press = 1.0
+        self.master_pan_at_press = 0.0
         
         # Global Shortcuts
         self.shortcut_play = QShortcut(QKeySequence(Qt.Key_Space), self)
@@ -142,12 +146,17 @@ class MainWindow(QMainWindow):
         self.left_layout.setContentsMargins(0, 0, 0, 0)
         self.left_layout.setSpacing(0)
 
-        # Margin fix
-        self.top_left_corner = QFrame()
-        self.top_left_corner.setObjectName("TopLeftCorner")
-        self.top_left_corner.setFixedHeight(30)
+        # Margin fix / Master Track
+        from ui.widgets.master_track import MasterTrackWidget
+        self.master_track_widget = MasterTrackWidget(self.audio.master_track)
+        self.master_track_widget.fx_requested.connect(self.open_master_fx)
+        self.master_track_widget.volume_set.connect(self.on_master_volume_set)
+        self.master_track_widget.pan_set.connect(self.on_master_pan_set)
+        self.master_track_widget.slider_pressed.connect(self.capture_master_vol)
+        self.master_track_widget.dial_pressed.connect(self.capture_master_pan)
+        self.master_track_widget.fx_bypass_toggled.connect(self.on_master_bypass_toggled)
         
-        self.left_layout.addWidget(self.top_left_corner)
+        self.left_layout.addWidget(self.master_track_widget)
         
         # Add Track Button
         self.btn_add_track = QPushButton("+")
@@ -174,6 +183,12 @@ class MainWindow(QMainWindow):
         self.right_layout.setContentsMargins(0, 0, 0, 0)
         self.right_layout.setSpacing(0)
         
+        # 1. Custom Horizontal Scrollbar (Top)
+        self.h_scrollbar = QScrollBar(Qt.Horizontal)
+        self.h_scrollbar.setFixedHeight(20)
+        self.right_layout.addWidget(self.h_scrollbar)
+
+        # 2. Timeline Ruler
         self.timeline = TimelineRuler()
         self.timeline.set_bpm(self.audio.bpm)
         self.timeline.position_changed.connect(self.user_seek)
@@ -189,11 +204,12 @@ class MainWindow(QMainWindow):
         self.timeline_scroll.setWidget(self.timeline)
         self.right_layout.addWidget(self.timeline_scroll)
 
-        # Track Container (for grid lines and holding lanes)
+        # 3. Track Container (for grid lines and holding lanes)
         self.right_scroll = QScrollArea()
         self.right_scroll.setWidgetResizable(True)
         self.right_scroll.setFrameShape(QFrame.NoFrame)
-        self.right_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn) # Ensure horizontal scrollbar is always visible for track content
+        self.right_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff) # Use custom top scrollbar
+        self.right_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
 
         self.right_content = TrackContainer() # This is the widget that draws the grid and holds the track lanes
         self.right_content.pixels_per_second = self.timeline.pixels_per_second
@@ -212,7 +228,7 @@ class MainWindow(QMainWindow):
         splitter.addWidget(right_widget) # Add the main right_widget to the splitter
         splitter.setSizes([200, 1000])
 
-        self.sync_scrollbars()
+        self.sync_scrollbars_custom()
 
         # Initialize Track Manager
         self.track_manager = TrackManager(
@@ -239,6 +255,9 @@ class MainWindow(QMainWindow):
         self.track_manager.loading_progress.connect(self.ribbon.update_loading)
         self.track_manager.loading_finished.connect(self.on_project_loaded)
         self.track_manager.status_update.connect(self.ribbon.set_status)
+        
+        # Connect Selection (Legacy/Other usage?)
+        # self.track_manager.track_selected.connect(...)
 
     def on_project_loaded(self):
         self.ribbon.hide_loading()
@@ -368,9 +387,6 @@ class MainWindow(QMainWindow):
         self.edit_cursor_time = time_sec
         self.timeline.set_cursor(x_pixels)
         
-        # If playing, we might want to scrub (move playhead too)
-        # Or if stopped, we want playhead to match cursor
-        # For now, let's keep them synced on seek for standard behavior
         self.audio.set_playhead(x_pixels, px_per_second=self.timeline.pixels_per_second)
         self.update_playhead_visuals(x_pixels, scroll_to_view=False)
 
@@ -393,15 +409,11 @@ class MainWindow(QMainWindow):
              viewport_width = self.right_scroll.viewport().width()
              current_scroll = self.right_scroll.horizontalScrollBar().value()
              
-             # "Push" logic: When playhead hits 3/4 of the view, scroll to keep it there
-             threshold_offset = viewport_width * 0.75
-             
-             # Logic: If playhead is to the right of the threshold,
-             # update scroll so that playhead stays at that relative position.
-             
-             if x > current_scroll + threshold_offset:
-                 target_scroll = int(x - threshold_offset)
-                 self.right_scroll.horizontalScrollBar().setValue(target_scroll)
+             # "Page" logic: If playhead goes off screen to the right, jump view to it
+             # This aligns the playhead to the beginning (left) of the new view
+             if x > current_scroll + viewport_width:
+                 target_scroll = x
+                 self.right_scroll.horizontalScrollBar().setValue(int(target_scroll))
 
     def zoom_in_step(self):
         self.perform_zoom_step(1)
@@ -476,6 +488,88 @@ class MainWindow(QMainWindow):
         
         self.right_scroll.horizontalScrollBar().setValue(new_scroll)
 
+    def sync_scrollbars_custom(self):
+        # 1. Vertical Sync: Left Scroll <-> Right Scroll
+        self.left_scroll.verticalScrollBar().valueChanged.connect(
+            self.right_scroll.verticalScrollBar().setValue
+        )
+        self.right_scroll.verticalScrollBar().valueChanged.connect(
+            self.left_scroll.verticalScrollBar().setValue
+        )
+        
+        # 2. Horizontal Sync: Top HBuffer <-> Timeline Scroll <-> Right Scroll
+        # We process 'valueChanged' for 2-way sync
+        
+        # Function to update others without loop
+        def sync_h(val):
+            if self.timeline_scroll.horizontalScrollBar().value() != val:
+                self.timeline_scroll.horizontalScrollBar().setValue(val)
+            if self.right_scroll.horizontalScrollBar().value() != val:
+                self.right_scroll.horizontalScrollBar().setValue(val)
+            if self.h_scrollbar.value() != val:
+                self.h_scrollbar.setValue(val)
+                
+        self.h_scrollbar.valueChanged.connect(sync_h)
+        self.timeline_scroll.horizontalScrollBar().valueChanged.connect(sync_h)
+        self.right_scroll.horizontalScrollBar().valueChanged.connect(sync_h)
+        
+        # IMPORTANT: Sync RANGES too
+        # When timeline/track grows, scrollbar range must update
+        def update_range(min_val, max_val):
+             self.h_scrollbar.setRange(min_val, max_val)
+             self.h_scrollbar.setPageStep(self.right_scroll.horizontalScrollBar().pageStep())
+             
+        self.right_scroll.horizontalScrollBar().rangeChanged.connect(update_range)
+
+    def update_zoom(self, px_per_sec):
+        # Propagate zoom to track manager/lanes
+        self.track_manager.update_zoom(px_per_sec)
+
+    def open_master_fx(self):
+        # We need a unique ID for master track window
+        # TrackManager usually takes a lane_index.
+        # We can reuse TrackManager logic or handle it here.
+        # Let's ask TrackManager to handle it with a special ID or method.
+        self.track_manager.open_master_fx_window(self.audio.master_track)
+
+    def capture_master_vol(self):
+        self.master_vol_at_press = self.audio.master_track.volume
+
+    def capture_master_pan(self):
+        self.master_pan_at_press = self.audio.master_track.pan
+
+    def on_master_volume_set(self, new_vol):
+        from core.commands import ChangeMasterVolumeCommand
+        
+        old_vol = getattr(self, 'master_vol_at_press', new_vol)
+        if abs(new_vol - old_vol) > 0.001:
+             cmd = ChangeMasterVolumeCommand(
+                 self.audio.master_track,
+                 self.master_track_widget,
+                 old_vol,
+                 new_vol
+             )
+             self.undo_stack.push(cmd)
+
+    def on_master_pan_set(self, new_pan):
+        from core.commands import ChangeMasterPanCommand
+        
+        old_pan = getattr(self, 'master_pan_at_press', new_pan)
+        if abs(new_pan - old_pan) > 0.001:
+             cmd = ChangeMasterPanCommand(
+                 self.audio.master_track,
+                 self.master_track_widget,
+                 old_pan,
+                 new_pan
+             )
+             self.undo_stack.push(cmd)
+
+    def on_master_bypass_toggled(self, checked):
+        from core.commands import ToggleFXBypassCommand
+        # Master track index is -1
+        cmd = ToggleFXBypassCommand(self.track_manager, -1, checked)
+        self.undo_stack.push(cmd)
+
     def handle_drag_started(self):
         self.scroll_timer.start()
 
@@ -514,11 +608,6 @@ class MainWindow(QMainWindow):
             self.right_scroll.horizontalScrollBar().setValue(new_scroll)
             
             # Update Playhead to match new position under mouse
-            # We want the playhead to stay under the mouse physically, 
-            # which means its logical time advances as we scroll.
-            
-            # Recalculate local x in the new scrolled context
-            # New absolute pixel = new_scroll + mouse_pos.x()
             new_absolute_x = new_scroll + mouse_pos.x()
             new_absolute_x = max(0, new_absolute_x)
             
