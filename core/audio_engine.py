@@ -22,6 +22,10 @@ class AudioEngine(QObject):
         self.stream = None
         self.is_looping = False
         self.loop_end_sample = 0
+        
+        # Metering
+        self.track_peaks = {} # Map track object to float 0.0-1.0
+        self.master_peak = 0.0
 
     def add_track_data(self, track_obj):
         self.tracks.append(track_obj)
@@ -173,7 +177,15 @@ class AudioEngine(QObject):
             gains = np.array([left_gain, right_gain], dtype='float32') * track.volume
             
             # 4. Mix to Master
+            # 4. Mix to Master
             mix_buffer += track_buffer * gains
+            
+            # --- Capture Peak Metering ---
+            # Using simple max abs of the processed buffer
+            # We store it on the track object itself for easy UI retrieval, or in our dict
+            peak = np.max(np.abs(track_buffer)) * track.volume # Apply volume roughly for post-fader meter
+            self.track_peaks[track] = float(peak)
+            
             
         # --- MASTER TRACK PROCESSING ---
         if hasattr(self, 'master_track'):
@@ -195,6 +207,9 @@ class AudioEngine(QObject):
              
              mix_buffer[:, 0] *= master_gains[0]
              mix_buffer[:, 1] *= master_gains[1]
+             
+             # Capture Master Peak
+             self.master_peak = float(np.max(np.abs(mix_buffer)))
         # -------------------------------
         
         return mix_buffer

@@ -180,10 +180,10 @@ class TrackManager(QObject):
         
         self.lanes.insert(index, lane)
         
-        header_insert_idx = 1 + index
+        header_insert_idx = index
         self.left_layout.insertWidget(header_insert_idx, header)
 
-        lane_insert_idx = index
+        lane_insert_idx = index 
         self.right_layout.insertWidget(lane_insert_idx, lane)
         
         self.btn_add_track.setText("+")
@@ -207,11 +207,11 @@ class TrackManager(QObject):
             self.lanes.pop(index)
 
         # Remove widgets
-        # Header index: 1 + index
-        header_item = self.left_layout.takeAt(1 + index)
+        # Header index: index
+        header_item = self.left_layout.takeAt(index)
         if header_item: header_item.widget().deleteLater()
 
-        # Lane index: index
+        # Lane index: index 
         lane_item = self.right_layout.takeAt(index)
         if lane_item: lane_item.widget().deleteLater()
         
@@ -229,20 +229,20 @@ class TrackManager(QObject):
         layout_index = self.left_layout.indexOf(sender_header)
         if layout_index == -1: return 
         
-        track_index = layout_index - 1 # 1 is offset for top corner
+        track_index = layout_index # 1 is offset for top corner -> Removed
         
         cmd = DeleteTrackCommand(self, track_index)
         self.undo_stack.push(cmd)
 
     def handle_mute(self):
         sender = self.sender()
-        idx = self.left_layout.indexOf(sender) - 1 
+        idx = self.left_layout.indexOf(sender) 
         cmd = ToggleMuteCommand(self, idx)
         self.undo_stack.push(cmd)
         
     def handle_solo(self):
         sender = self.sender()
-        idx = self.left_layout.indexOf(sender) - 1
+        idx = self.left_layout.indexOf(sender)
         cmd = ToggleSoloCommand(self, idx)
         self.undo_stack.push(cmd)
 
@@ -251,7 +251,7 @@ class TrackManager(QObject):
         layout_index = self.left_layout.indexOf(sender_header)
         if layout_index == -1: return 
         
-        track_index = layout_index - 1
+        track_index = layout_index
         
         # Get old color
         old_color = "#5577cc"
@@ -266,7 +266,7 @@ class TrackManager(QObject):
         layout_index = self.left_layout.indexOf(sender_header)
         if layout_index == -1: return 
         
-        track_index = layout_index - 1
+        track_index = layout_index
         
         if 0 <= track_index < len(self.audio.tracks):
              self.audio.set_track_volume(track_index, volume)
@@ -276,7 +276,7 @@ class TrackManager(QObject):
         layout_index = self.left_layout.indexOf(sender_header)
         if layout_index == -1: return 
         
-        track_index = layout_index - 1
+        track_index = layout_index
         
         if 0 <= track_index < len(self.audio.tracks):
             self.temp_volumes[track_index] = self.audio.tracks[track_index].volume
@@ -286,7 +286,7 @@ class TrackManager(QObject):
         layout_index = self.left_layout.indexOf(sender_header)
         if layout_index == -1: return 
         
-        track_index = layout_index - 1
+        track_index = layout_index
         
         old_volume = self.temp_volumes.get(track_index, 1.0)
         # Clean up
@@ -614,7 +614,7 @@ class TrackManager(QObject):
 
     def get_header_widget(self, track_index):
         # 0-th item is probably valid, but our insertion logic uses index + 1
-        item = self.left_layout.itemAt(track_index + 1)
+        item = self.left_layout.itemAt(track_index)
         if item and item.widget():
             return item.widget()
         return None
@@ -712,6 +712,21 @@ class TrackManager(QObject):
         for lane in self.lanes:
             lane.set_playhead(x)
 
+    def update_meters(self):
+        # Master Track
+        if hasattr(self.audio, 'master_peak') and hasattr(self.main_window, 'master_track_widget'):
+            self.main_window.master_track_widget.slider_volume.set_meter_level(self.audio.master_peak)
+            
+        # Individual Tracks
+        for i, track in enumerate(self.audio.tracks):
+            peak = self.audio.track_peaks.get(track, 0.0)
+            
+            # Find associated header
+            # Layout logic: itemAt(i + 1)
+            header = self.get_header_widget(i)
+            if header and hasattr(header, 'slider_volume'):
+                 header.slider_volume.set_meter_level(peak)
+
     def load_project(self, file_path):
         from core.project_manager import ProjectManager
         import numpy as np
@@ -729,13 +744,12 @@ class TrackManager(QObject):
 
         self.clear_all_tracks()
 
-        # Load Master Track Settings if available
-        # Note: self.main_window must be available to update GUI
         master_data = project_data.get("master")
         if master_data and hasattr(self.main_window, 'master_track_widget'):
             # Model
             self.audio.master_track.volume = master_data.get("volume", 1.0)
             self.audio.master_track.pan = master_data.get("pan", 0.0)
+            self.audio.master_track.fx_bypass = master_data.get("fx_bypass", False)
             
             # Effects
             self.audio.master_track.effects.clear()
@@ -758,6 +772,7 @@ class TrackManager(QObject):
                 self.main_window.master_track_widget.blockSignals(True)
                 self.main_window.master_track_widget.slider_volume.setValue(int(self.audio.master_track.volume * 100))
                 self.main_window.master_track_widget.dial_pan.setValue(self.audio.master_track.pan * 100)
+                self.main_window.master_track_widget.set_bypass(self.audio.master_track.fx_bypass)
                 self.main_window.master_track_widget.update_fx_count(len(self.audio.master_track.effects))
                 self.main_window.master_track_widget.blockSignals(False)
             except Exception as e:
@@ -832,6 +847,7 @@ class TrackManager(QObject):
             track.volume = track_info.get("volume", 1.0) 
             track.pan = track_info.get("pan", 0.0)
             track.color = track_info.get("color", "#4466aa") # Load saved color
+            track.fx_bypass = track_info.get("fx_bypass", False)
             
             # Restore Effects
             effects_data = track_info.get("effects", [])
@@ -881,7 +897,6 @@ class TrackManager(QObject):
         if sender_lane not in self.lanes: return
         lane_index = self.lanes.index(sender_lane)
 
-        # Clear selection in ALL lanes (including sender first, to be safe, or just others)
         for lane in self.lanes:
             if lane == sender_lane:
                 lane.set_selection(clip_index)

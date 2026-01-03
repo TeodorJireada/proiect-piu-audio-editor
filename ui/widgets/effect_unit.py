@@ -3,7 +3,7 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QGroupB
 from PySide6.QtCore import Qt
 from core.commands import ToggleEffectCommand, ChangeEffectParamCommand
 
-from ui.widgets.knob import DraggableDial
+from ui.widgets.knob import ModernKnobChunky
 
 class EffectUnit(QGroupBox):
     def __init__(self, effect, undo_stack, parent=None):
@@ -45,7 +45,7 @@ class EffectUnit(QGroupBox):
             if "gain" in name: default_val = 50
             if "mix" in name: default_val = 100
              
-            dial = DraggableDial(default_value=default_val)
+            dial = ModernKnobChunky(default_value=default_val)
             dial.setFixedSize(40, 40)
             dial.setNotchesVisible(True)
             self.dials[name] = dial

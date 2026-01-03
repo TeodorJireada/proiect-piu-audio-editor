@@ -3,7 +3,7 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout,
                                QHBoxLayout, QPushButton, QScrollArea, QSplitter, 
                                QFrame, QFileDialog, QMessageBox, QCheckBox, QSizePolicy, QApplication, QScrollBar)
 from PySide6.QtGui import QShortcut, QKeySequence
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, QEvent
 
 from core.audio_engine import AudioEngine
 from core.track_loader import TrackLoader
@@ -135,17 +135,13 @@ class MainWindow(QMainWindow):
         self.main_layout.addWidget(splitter)
 
         # LEFT PANEL (headers)
-        self.left_scroll = QScrollArea()
-        self.left_scroll.setWidgetResizable(True)
-        self.left_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.left_scroll.setFrameShape(QFrame.NoFrame)
-
-        self.left_container = QWidget()
-        self.left_layout = QVBoxLayout(self.left_container)
-        self.left_layout.setContentsMargins(0, 0, 0, 0)
-        self.left_layout.setSpacing(0)
-
+        # We want Master Track sticky on top, so we use a wrapper widget.
+        
+        left_panel = QWidget()
+        left_panel_layout = QVBoxLayout(left_panel)
+        left_panel_layout.setContentsMargins(0, 0, 0, 0)
+        left_panel_layout.setSpacing(0)
+        
         # Margin fix / Master Track
         from ui.widgets.master_track import MasterTrackWidget
         self.master_track_widget = MasterTrackWidget(self.audio.master_track)
@@ -156,9 +152,23 @@ class MainWindow(QMainWindow):
         self.master_track_widget.dial_pressed.connect(self.capture_master_pan)
         self.master_track_widget.fx_bypass_toggled.connect(self.on_master_bypass_toggled)
         
-        self.left_layout.addWidget(self.master_track_widget)
+        # Sticky Master on Top
+        left_panel_layout.addWidget(self.master_track_widget)
+
+        # Scroll Area for Tracks
+        self.left_scroll = QScrollArea()
+        self.left_scroll.setWidgetResizable(True)
+        self.left_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.left_scroll.setFrameShape(QFrame.NoFrame)
+        self.left_scroll.viewport().installEventFilter(self) # Intercept Ctrl+Scroll
+
+        self.left_container = QWidget()
+        self.left_layout = QVBoxLayout(self.left_container)
+        self.left_layout.setContentsMargins(0, 0, 0, 0)
+        self.left_layout.setSpacing(0)
         
-        # Add Track Button
+        # Add Track Button (Inside Scroll)
         self.btn_add_track = QPushButton("+")
         self.btn_add_track.setObjectName("AddTrackButton")
         self.btn_add_track.setFixedHeight(80)
@@ -169,12 +179,13 @@ class MainWindow(QMainWindow):
         self.left_layout.addStretch()
         
         self.left_scroll.setWidget(self.left_container)
+        left_panel_layout.addWidget(self.left_scroll)
         
-        # Limit resizing
-        self.left_scroll.setMinimumWidth(200)
-        self.left_scroll.setMaximumWidth(500)
+        # Limit resizing (Apply to the panel, not just scroll)
+        left_panel.setMinimumWidth(320)
+        left_panel.setMaximumWidth(500)
         
-        splitter.addWidget(self.left_scroll)
+        splitter.addWidget(left_panel)
         splitter.setCollapsible(0, False)
 
         # RIGHT PANEL (Timeline + Lanes)
@@ -210,6 +221,7 @@ class MainWindow(QMainWindow):
         self.right_scroll.setFrameShape(QFrame.NoFrame)
         self.right_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff) # Use custom top scrollbar
         self.right_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+        self.right_scroll.viewport().installEventFilter(self) # Intercept Ctrl+Scroll
 
         self.right_content = TrackContainer() # This is the widget that draws the grid and holds the track lanes
         self.right_content.pixels_per_second = self.timeline.pixels_per_second
@@ -218,6 +230,12 @@ class MainWindow(QMainWindow):
         self.right_inner_layout = QVBoxLayout(self.right_content) # This layout will hold the actual TrackLane widgets
         self.right_inner_layout.setContentsMargins(0, 0, 0, 0)
         self.right_inner_layout.setSpacing(0)
+        
+        # Bottom Spacer to match AddTrackButton height (80px)
+        self.right_bottom_spacer = QWidget()
+        self.right_bottom_spacer.setFixedHeight(80)
+        self.right_inner_layout.addWidget(self.right_bottom_spacer)
+
         self.right_inner_layout.addStretch()
         
         self.right_scroll.setWidget(self.right_content)
@@ -226,7 +244,11 @@ class MainWindow(QMainWindow):
         self.track_container = self.right_content # Alias for compatibility
         
         splitter.addWidget(right_widget) # Add the main right_widget to the splitter
-        splitter.setSizes([200, 1000])
+        
+        # Fixed Left Panel behavior
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([340, 1000])
 
         self.sync_scrollbars_custom()
 
@@ -400,6 +422,8 @@ class MainWindow(QMainWindow):
              
         x_pixel = int(current_time * self.timeline.pixels_per_second)
         self.update_playhead_visuals(x_pixel, scroll_to_view=True)
+        
+        self.track_manager.update_meters()
 
     def update_playhead_visuals(self, x, scroll_to_view=False):
         self.timeline.set_playhead(x)
@@ -615,6 +639,15 @@ class MainWindow(QMainWindow):
             self.user_seek(new_absolute_x)
 
 
+    def eventFilter(self, source, event):
+        if event.type() == QEvent.Wheel:
+            if event.modifiers() & Qt.ControlModifier:
+                # Intercept Zoom here to prevent ScrollArea from scrolling
+                delta = event.angleDelta().y()
+                self.perform_zoom(delta, event.globalPosition())
+                return True # Consume event
+        return super().eventFilter(source, event)
+
     def wheelEvent(self, event):
         if event.modifiers() & Qt.ControlModifier:
             delta = event.angleDelta().y()
@@ -696,10 +729,10 @@ class MainWindow(QMainWindow):
             self.on_save_project_as()
 
     def on_save_project_as(self):
-        file_path, _ = QFileDialog.getSaveFileName(self, "Save Project As", "", "Project Files (*.json)")
+        file_path, _ = QFileDialog.getSaveFileName(self, "Save Project As", "", "Project Files (*.pydaw)")
         if file_path:
-            if not file_path.endswith(".json"):
-                file_path += ".json"
+            if not file_path.endswith(".pydaw"):
+                file_path += ".pydaw"
             
             self.current_project_path = file_path
             success = self.project_manager.save_project(file_path, self.audio)
@@ -716,7 +749,7 @@ class MainWindow(QMainWindow):
         if not self.check_save_changes():
             return
 
-        file_path, _ = QFileDialog.getOpenFileName(self, "Open Project", "", "Project Files (*.json)")
+        file_path, _ = QFileDialog.getOpenFileName(self, "Open Project", "", "Project Files (*.pydaw)")
         if file_path:
             # Use TrackManager's async loader
             self.track_manager.load_project(file_path)

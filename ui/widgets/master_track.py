@@ -1,6 +1,7 @@
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QFrame, QLabel, QPushButton, QHBoxLayout, QGridLayout, QWidget, QSizePolicy, QSlider
-from ui.widgets.knob import DraggableDial
+from PySide6.QtWidgets import QFrame, QLabel, QPushButton, QHBoxLayout, QGridLayout, QWidget, QSizePolicy
+from ui.widgets.slider import ModernSlider
+from ui.widgets.knob import ModernKnobChunky
 
 class MasterTrackWidget(QFrame):
     # Signals identical to TrackHeader where possible for compatibility
@@ -19,8 +20,8 @@ class MasterTrackWidget(QFrame):
         self.audio_track = audio_track
         self.setObjectName("MasterTrackWidget")
         self.setFixedHeight(50) # Matches top-left corner height
-        self.setMinimumWidth(200) # Matches left panel width
-        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.setMinimumWidth(0) 
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         
         # Styles
         self.setStyleSheet("""
@@ -66,11 +67,13 @@ class MasterTrackWidget(QFrame):
         self.btn_fx_bypass.clicked.connect(self.on_bypass_clicked)
         layout.addWidget(self.btn_fx_bypass)
         
+        layout.addStretch() # Push controls to right
+        
         # Pan Dial
-        self.dial_pan = DraggableDial(default_value=0)
+        self.dial_pan = ModernKnobChunky(default_value=0)
         self.dial_pan.setRange(-100, 100)
         self.dial_pan.setValue(0)
-        self.dial_pan.setFixedSize(24, 24) # Slightly smaller
+        self.dial_pan.setFixedSize(30, 30) # Match TrackHeader
         self.dial_pan.setToolTip("Master Pan: Center")
         
         self.dial_pan.valueChanged.connect(self.on_dial_value_changed)
@@ -80,10 +83,10 @@ class MasterTrackWidget(QFrame):
         layout.addWidget(self.dial_pan)
         
         # Volume Slider
-        self.slider_volume = QSlider(Qt.Horizontal)
+        self.slider_volume = ModernSlider(Qt.Horizontal)
         self.slider_volume.setRange(0, 100)
         self.slider_volume.setValue(100) # Default full volume
-        self.slider_volume.setFixedWidth(60)
+        self.slider_volume.setFixedWidth(80) # Match TrackHeader
         self.slider_volume.setToolTip("Master Volume: 100%")
         
         self.slider_volume.valueChanged.connect(self.on_slider_value_changed)

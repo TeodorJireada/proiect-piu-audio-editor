@@ -144,15 +144,14 @@ class Ribbon(QFrame):
         self.btn_play.clicked.connect(self.play_clicked.emit)
 
         # Loop
-        self.btn_loop = QPushButton("Loop")
+        # Loop
+        self.btn_loop = create_icon_btn("loop", "Toggle Loop")
         self.btn_loop.setCheckable(True)
         self.btn_loop.setChecked(True)
         self.btn_loop.clicked.connect(lambda c: self.loop_toggled.emit(c))
-        self.btn_loop.setFixedHeight(30)
         self.btn_loop.setStyleSheet("""
             QPushButton:checked {
                 background-color: #4466aa;
-                color: white;
                 border-radius: 4px;
             }
         """)

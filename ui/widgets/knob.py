@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import QDial, QMenu
-from PySide6.QtGui import QAction, QAction
-from PySide6.QtCore import Qt
+from PySide6.QtGui import QAction, QPainter, QPen, QColor, QPainterPath
+from PySide6.QtCore import Qt, QRectF
 
 class DraggableDial(QDial):
     def __init__(self, parent=None, default_value=0):
@@ -48,3 +48,74 @@ class DraggableDial(QDial):
              self.sliderPressed.emit() # Simulate start of interaction
              self.setValue(self.default_value)
              self.sliderReleased.emit() # Simulate end of interaction
+
+class BaseModernKnob(DraggableDial):
+    def get_normalized_value(self):
+        if self.maximum() == self.minimum():
+            return 0.0
+        return (self.value() - self.minimum()) / (self.maximum() - self.minimum())
+
+class ModernKnobChunky(BaseModernKnob):
+    """Bold chunky aesthetics."""
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        w, h = self.width(), self.height()
+        side = min(w, h)
+        painter.translate(w / 2, h / 2)
+        scale = side / 100.0
+        painter.scale(scale, scale)
+
+        norm = self.get_normalized_value()
+        start_angle = 240
+        span_angle = -300
+
+        # Background Arc
+        painter.setBrush(Qt.NoBrush)
+        painter.setPen(QPen(QColor("#222222"), 10, Qt.SolidLine, Qt.FlatCap))
+        path_bg = QPainterPath()
+        path_bg.arcMoveTo(QRectF(-40, -40, 80, 80), start_angle)
+        path_bg.arcTo(QRectF(-40, -40, 80, 80), start_angle, span_angle)
+        painter.drawPath(path_bg)
+
+        # Active Arc
+        is_bipolar = self.minimum() < 0 and self.maximum() > 0
+        
+        if is_bipolar:
+            # Bipolar Mode (Center Zero)
+            center_angle = start_angle + (span_angle / 2)
+            current_angle = start_angle + (span_angle * norm)
+            draw_span = current_angle - center_angle
+            
+            # Colors: Left (val < 0) = Teal, Right (val > 0) = Orange
+            # Note: norm < 0.5 means Left, norm > 0.5 means Right
+            color = QColor("#339999") if norm < 0.5 else QColor("#ffc107") # Teal vs Orange
+            
+            if abs(norm - 0.5) > 0.01: # Don't draw if at center
+                painter.setPen(QPen(color, 10, Qt.SolidLine, Qt.FlatCap))
+                path_val = QPainterPath()
+                path_val.arcMoveTo(QRectF(-40, -40, 80, 80), center_angle)
+                path_val.arcTo(QRectF(-40, -40, 80, 80), center_angle, draw_span)
+                painter.drawPath(path_val)
+                
+        else:
+            # Standard Unipolar Mode
+            if norm > 0:
+                painter.setPen(QPen(QColor("#ffc107"), 10, Qt.SolidLine, Qt.FlatCap))
+                path_val = QPainterPath()
+                path_val.arcMoveTo(QRectF(-40, -40, 80, 80), start_angle)
+                path_val.arcTo(QRectF(-40, -40, 80, 80), start_angle, span_angle * norm)
+                painter.drawPath(path_val)
+
+        # Knob Body
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor("#333333"))
+        painter.drawEllipse(-30, -30, 60, 60)
+
+         # Indicator Bar
+        painter.save()
+        painter.rotate(-150 + (norm * 300))
+        painter.setBrush(QColor("#ffffff"))
+        painter.drawRoundedRect(QRectF(-2.5, -25, 5, 12), 2, 2) 
+        painter.restore()

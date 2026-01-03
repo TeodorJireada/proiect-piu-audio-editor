@@ -1,5 +1,6 @@
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QFrame, QLabel, QPushButton, QHBoxLayout, QGridLayout, QWidget, QSizePolicy, QMenu, QSlider, QDial
+from PySide6.QtWidgets import QFrame, QLabel, QPushButton, QHBoxLayout, QGridLayout, QWidget, QSizePolicy, QMenu, QDial
+from ui.widgets.slider import ModernSlider
 from PySide6.QtGui import QAction, QColor
 
 class ColorStrip(QFrame):
@@ -48,7 +49,7 @@ class ColorStrip(QFrame):
         self.update_color(color_hex)
         self.color_selected.emit(color_hex)
 
-from ui.widgets.knob import DraggableDial
+from ui.widgets.knob import ModernKnobChunky
 
 class TrackHeader(QFrame):
     mute_clicked = Signal()
@@ -150,7 +151,7 @@ class TrackHeader(QFrame):
         btn_layout.addStretch() # Push slider to right
         
         # Pan Dial
-        self.dial_pan = DraggableDial(default_value=0)
+        self.dial_pan = ModernKnobChunky(default_value=0)
         self.dial_pan.setRange(-100, 100)
         self.dial_pan.setValue(0)
         self.dial_pan.setFixedSize(30, 30)
@@ -163,7 +164,7 @@ class TrackHeader(QFrame):
         btn_layout.addWidget(self.dial_pan)
         
         # Volume Slider
-        self.slider_volume = QSlider(Qt.Horizontal)
+        self.slider_volume = ModernSlider(Qt.Horizontal)
         self.slider_volume.setRange(0, 100)
         self.slider_volume.setValue(100)
         self.slider_volume.setFixedWidth(80) 
