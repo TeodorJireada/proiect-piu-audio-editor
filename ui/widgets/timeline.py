@@ -1,4 +1,4 @@
-from PySide6.QtCore import Signal, Qt
+from PySide6.QtCore import Signal, Qt, QPointF
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QWidget
 
@@ -10,7 +10,7 @@ class TimelineRuler(QWidget):
 
     def __init__(self):
         super().__init__()
-        self.setFixedHeight(30)
+        self.setFixedHeight(25)
         self.setMinimumWidth(3000)
         self.playhead_x = 0
         self.cursor_x = 0
@@ -69,6 +69,7 @@ class TimelineRuler(QWidget):
 
     def paintEvent(self, event):
         painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
         painter.setPen(QColor(150, 150, 150))
         
         # Calculations
@@ -114,15 +115,13 @@ class TimelineRuler(QWidget):
              else:
                  height = 8
                  
-             painter.drawLine(x, 30, x, 30 - height)
+             painter.drawLine(x, self.height(), x, self.height() - height)
 
         painter.setPen(QPen(QColor(255, 50, 50), 2))
-        playhead_x_int = int(self.playhead_x)
-        painter.drawLine(playhead_x_int, 0, playhead_x_int, 30)
+        painter.drawLine(QPointF(self.playhead_x, 0), QPointF(self.playhead_x, self.height()))
 
         # Draw Edit Cursor (Blue)
         painter.setPen(QPen(QColor(100, 100, 255), 2))
-        cursor_x_int = int(self.cursor_x)
-
-        if cursor_x_int != playhead_x_int:
-             painter.drawLine(cursor_x_int, 0, cursor_x_int, 30)
+        
+        if abs(self.cursor_x - self.playhead_x) > 0.5:
+             painter.drawLine(QPointF(self.cursor_x, 0), QPointF(self.cursor_x, self.height()))

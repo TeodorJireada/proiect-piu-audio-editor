@@ -1,25 +1,36 @@
-from PySide6.QtWidgets import QSlider, QStyle, QStyleOptionSlider
-from PySide6.QtGui import QPainter, QBrush, QColor, QPen, QPainterPath
+from PySide6.QtWidgets import QSlider, QStyle, QStyleOptionSlider, QMenu
+from PySide6.QtGui import QPainter, QBrush, QColor, QPen, QPainterPath, QPalette, QAction
 from PySide6.QtCore import Qt, QRectF
 
 class ModernSlider(QSlider):
-    def __init__(self, orientation=Qt.Horizontal, parent=None):
+    def __init__(self, orientation=Qt.Horizontal, parent=None, default_value=100):
         super().__init__(orientation, parent)
         self.setMouseTracking(True)
         self.setMinimumHeight(24) # Ensure enough vertical space for handle
         self.meter_level = 0.0 # 0.0 to 1.0
+        self.default_value = default_value
 
     def set_meter_level(self, level):
         self.meter_level = max(0.0, min(1.0, level))
         self.update()
 
+    def contextMenuEvent(self, event):
+        menu = QMenu(self)
+        reset_action = QAction("Reset", self)
+        reset_action.triggered.connect(self.reset_to_default)
+        menu.addAction(reset_action)
+        menu.exec(event.globalPos())
 
-
-
+    def reset_to_default(self):
+        if self.value() != self.default_value:
+             self.sliderPressed.emit() # Simulate start of interaction
+             self.setValue(self.default_value)
+             self.sliderReleased.emit() # Simulate end of interaction
 
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
+        palette = self.palette()
 
         # Get geometric info
         opt = QStyleOptionSlider()
@@ -54,7 +65,8 @@ class ModernSlider(QSlider):
             # Draw Continuous Track Background (Inactive part)
             # We draw the full track first, so there is no "transparency" behind the handle or gaps.
             painter.setPen(Qt.NoPen)
-            painter.setBrush(QColor("#222222"))
+            # Use Window color darkened
+            painter.setBrush(palette.color(QPalette.Window).darker(150))
             painter.drawRoundedRect(track_rect, 3, 3)
             
             # Draw Meter / Active Track
@@ -79,7 +91,7 @@ class ModernSlider(QSlider):
                  draw_end_x = min(natural_meter_end_x, active_limit_x)
                  
                  if draw_end_x > track_rect.x():
-                     painter.setBrush(QColor("#44aa66")) # Green
+                     painter.setBrush(QColor("#44aa66")) # Green (Semantic)
                      
                      start_x = track_rect.left()
                      end_x = draw_end_x
@@ -125,7 +137,8 @@ class ModernSlider(QSlider):
             pass 
 
         # Draw Handle
-        painter.setBrush(QColor("#ffffff"))
+        # Use ButtonText color (usually white/bright in dark themes)
+        painter.setBrush(palette.color(QPalette.ButtonText))
         painter.setPen(Qt.NoPen)
         # Full rounded capsule shape (Radius = half width)
         # Since width 6, radius 3.

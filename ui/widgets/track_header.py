@@ -117,26 +117,18 @@ class TrackHeader(QFrame):
         
         # FX Button
         self.btn_fx = QPushButton("FX")
+        self.btn_fx.setObjectName("FXButton")
         self.btn_fx.setCheckable(False)
-        self.btn_fx.setFixedSize(40, 20) # Made wider (30 -> 40)
-        self.btn_fx.setStyleSheet("""
-            QPushButton { background-color: #333; border: 1px solid #555; border-radius: 2px; font-size: 10px; }
-            QPushButton:hover { background-color: #444; }
-            QPushButton:pressed { background-color: #666; }
-        """)
+        self.btn_fx.setFixedSize(40, 20) 
         self.btn_fx.clicked.connect(self.on_fx_clicked)
         btn_layout.addWidget(self.btn_fx)
 
         # FX Bypass
         self.btn_fx_bypass = QPushButton("Ø")
+        self.btn_fx_bypass.setObjectName("FXBypassButton")
         self.btn_fx_bypass.setFixedSize(20, 20)
         self.btn_fx_bypass.setCheckable(True)
         self.btn_fx_bypass.setToolTip("Bypass All Effects")
-        self.btn_fx_bypass.setStyleSheet("""
-            QPushButton { background-color: #333; border: 1px solid #555; border-radius: 2px; color: #aaa; font-size: 10px; font-weight: bold; }
-            QPushButton:checked { background-color: #aa4444; color: #fff; border: 1px solid #cc5555; }
-            QPushButton:hover { background-color: #444; }
-        """)
         self.btn_fx_bypass.clicked.connect(self.on_bypass_clicked)
         btn_layout.addWidget(self.btn_fx_bypass)
 
@@ -269,16 +261,10 @@ class TrackHeader(QFrame):
     def update_fx_count(self, count):
         if count > 0:
             self.btn_fx.setText(f"FX ({count})")
-            # Optional: Highlight color if active effects?
-            self.btn_fx.setStyleSheet("""
-                QPushButton { background-color: #445566; border: 1px solid #667788; border-radius: 2px; font-size: 10px; }
-                QPushButton:hover { background-color: #556677; }
-                QPushButton:pressed { background-color: #334455; }
-            """)
+            self.btn_fx.setProperty("active_fx", True)
         else:
             self.btn_fx.setText("FX")
-            self.btn_fx.setStyleSheet("""
-                QPushButton { background-color: #333; border: 1px solid #555; border-radius: 2px; font-size: 10px; }
-                QPushButton:hover { background-color: #444; }
-                QPushButton:pressed { background-color: #666; }
-            """)
+            self.btn_fx.setProperty("active_fx", False)
+        
+        self.btn_fx.style().unpolish(self.btn_fx)
+        self.btn_fx.style().polish(self.btn_fx)

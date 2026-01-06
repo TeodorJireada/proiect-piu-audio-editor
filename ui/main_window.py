@@ -1,23 +1,23 @@
 import os
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, 
                                QHBoxLayout, QPushButton, QScrollArea, QSplitter, 
-                               QFrame, QFileDialog, QMessageBox, QCheckBox, QSizePolicy, QApplication, QScrollBar)
+                               QFrame, QSizePolicy, QApplication, QScrollBar, QStyle)
 from PySide6.QtGui import QShortcut, QKeySequence
 from PySide6.QtCore import Qt, QTimer, QEvent
 
 from core.audio_engine import AudioEngine
-from core.track_loader import TrackLoader
 from ui.widgets.timeline import TimelineRuler
-from ui.widgets.track_header import TrackHeader
-from ui.widgets.track_lane import TrackLane
 from ui.widgets.track_container import TrackContainer
 from ui.widgets.ribbon import Ribbon
-from ui.track_manager import TrackManager
+from ui.tracks.manager import TrackManager
 from core.command_stack import UndoStack
 from core.project_manager import ProjectManager
 from core.commands import ChangeBPMCommand, ToggleLoopCommand, ToggleSnapCommand
 from ui.theme_manager import ThemeManager
-from PySide6.QtGui import QAction
+
+# Controllers
+from ui.controllers.viewport_controller import ViewportController
+from ui.controllers.project_io import ProjectIO
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -35,10 +35,6 @@ class MainWindow(QMainWindow):
         self.ui_timer.interval = 30 # 30ms refresh rate
         self.ui_timer.timeout.connect(self.update_ui)
 
-        self.scroll_timer = QTimer()
-        self.scroll_timer.setInterval(30)
-        self.scroll_timer.timeout.connect(self.check_edge_scroll)
-
         # UI SETUP
         self.lanes = [] 
         main_widget = QWidget()
@@ -47,22 +43,64 @@ class MainWindow(QMainWindow):
         self.main_layout.setContentsMargins(0, 0, 0, 0)
         self.main_layout.setSpacing(0)
 
+        self.project_manager = ProjectManager()
+
         self.setup_ribbon()
         self.setup_workspace()
         # self.setup_menu() # Menu removed
         
-        self.project_manager = ProjectManager()
-        self.current_project_path = None
-        self.clean_command = None
-        self.undo_stack.stack_changed.connect(self.update_dirty_state)
-
-        self.confirm_delete = True
-        self.confirm_delete = True
         self.edit_cursor_time = 0.0
         
         self.master_vol_at_press = 1.0
         self.master_pan_at_press = 0.0
         
+        # Initialize Track Manager
+        self.track_manager = TrackManager(
+            self, 
+            self.audio, 
+            self.undo_stack, 
+            self.timeline, 
+            self.left_layout, 
+            self.right_inner_layout, 
+            self.btn_add_track,
+            self.track_container
+        )
+        self.track_manager.track_container = self.track_container
+
+        # Initialize Controllers
+        self.viewport_controller = ViewportController(self)
+        self.project_io = ProjectIO(self)
+        
+        # Connect Ribbon Signals to IO
+        self.ribbon.new_clicked.connect(self.project_io.on_new_project)
+        self.ribbon.open_clicked.connect(self.project_io.on_open_project)
+        self.ribbon.save_clicked.connect(self.project_io.on_save_project)
+        self.ribbon.save_as_clicked.connect(self.project_io.on_save_project_as)
+        self.ribbon.export_clicked.connect(self.project_io.on_export_audio)
+
+        # Connect Ribbon Signals to Viewport
+        # (Zoom shortcuts are handled via QShortcut below)
+
+        # Initialize Logic States from UI Defaults
+        self.audio.set_looping(self.ribbon.btn_loop.isChecked())
+        self.track_manager.set_snap_enabled(self.ribbon.btn_snap.isChecked())
+        
+        # Connect Loading Signals
+        self.track_manager.loading_started.connect(lambda: self.ribbon.show_loading("Loading Project..."))
+        self.track_manager.loading_progress.connect(self.ribbon.update_loading)
+        self.track_manager.loading_finished.connect(self.on_project_loaded)
+        self.track_manager.status_update.connect(self.ribbon.set_status)
+
+        # Setup Shortcuts
+        self.setup_shortcuts()
+        
+        # Initial Dirty State
+        self.project_io.update_dirty_state()
+        
+        # Initialize Zoom to fit logic
+        QTimer.singleShot(50, lambda: self.viewport_controller.zoom_to_fit())
+
+    def setup_shortcuts(self):
         # Global Shortcuts
         self.shortcut_play = QShortcut(QKeySequence(Qt.Key_Space), self)
         self.shortcut_play.activated.connect(self.toggle_playback)
@@ -83,20 +121,25 @@ class MainWindow(QMainWindow):
 
         # Save (Ctrl+S)
         self.shortcut_save = QShortcut(QKeySequence("Ctrl+S"), self)
-        self.shortcut_save.activated.connect(self.on_save_project)
+        self.shortcut_save.activated.connect(self.project_io.on_save_project)
         self.shortcut_save.setContext(Qt.WindowShortcut)
 
         # Save As (Ctrl+Shift+S)
         self.shortcut_save_as = QShortcut(QKeySequence("Ctrl+Shift+S"), self)
-        self.shortcut_save_as.activated.connect(self.on_save_project_as)
+        self.shortcut_save_as.activated.connect(self.project_io.on_save_project_as)
         self.shortcut_save_as.setContext(Qt.WindowShortcut)
+        
+        # Duplicate Clip (Ctrl+B)
+        self.shortcut_duplicate = QShortcut(QKeySequence("Ctrl+B"), self)
+        self.shortcut_duplicate.activated.connect(self.duplicate_selection)
+        self.shortcut_duplicate.setContext(Qt.WindowShortcut)
 
         # Zoom Shortcuts
         self.shortcut_zoom_in = QShortcut(QKeySequence.ZoomIn, self)
         self.shortcut_zoom_in.activated.connect(self.zoom_in_step)
         self.shortcut_zoom_in.setContext(Qt.WindowShortcut)
 
-        # Handle Ctrl+= as well manually if ZoomIn doesn't cover it on some platforms
+        # Handle Ctrl+= as well manually
         self.shortcut_zoom_in_alt = QShortcut(QKeySequence("Ctrl+="), self)
         self.shortcut_zoom_in_alt.activated.connect(self.zoom_in_step)
         self.shortcut_zoom_in_alt.setContext(Qt.WindowShortcut)
@@ -105,12 +148,15 @@ class MainWindow(QMainWindow):
         self.shortcut_zoom_out.activated.connect(self.zoom_out_step)
         self.shortcut_zoom_out.setContext(Qt.WindowShortcut)
 
+    def duplicate_selection(self):
+        # Iterate lanes to find selection
+        for lane in self.track_manager.lanes:
+            if lane.selected_clip_index != -1:
+                lane.handle_duplicate(lane.selected_clip_index)
+                break # Only duplicate one selection at a time
+
     def setup_ribbon(self):
         self.ribbon = Ribbon()
-        self.ribbon.new_clicked.connect(self.on_new_project)
-        self.ribbon.open_clicked.connect(self.on_open_project)
-        self.ribbon.save_clicked.connect(self.on_save_project)
-        self.ribbon.export_clicked.connect(self.on_export_audio)
         self.ribbon.theme_switched.connect(lambda t: self.switch_theme(t))
         self.ribbon.bpm_changed.connect(self.on_bpm_changed)
         self.ribbon.snap_toggled.connect(self.on_snap_toggled)
@@ -122,7 +168,6 @@ class MainWindow(QMainWindow):
         self.ribbon.undo_clicked.connect(self.undo_action)
         self.ribbon.redo_clicked.connect(self.redo_action)
         self.ribbon.tool_changed.connect(self.on_tool_changed)
-        self.ribbon.tool_changed.connect(self.on_tool_changed)
         self.main_layout.addWidget(self.ribbon)
 
     def on_tool_changed(self, tool_name):
@@ -131,12 +176,9 @@ class MainWindow(QMainWindow):
     def setup_workspace(self):
         splitter = QSplitter(Qt.Horizontal)
         splitter.setHandleWidth(1)
-        # splitter style is now in styles.py
         self.main_layout.addWidget(splitter)
 
         # LEFT PANEL (headers)
-        # We want Master Track sticky on top, so we use a wrapper widget.
-        
         left_panel = QWidget()
         left_panel_layout = QVBoxLayout(left_panel)
         left_panel_layout.setContentsMargins(0, 0, 0, 0)
@@ -152,7 +194,6 @@ class MainWindow(QMainWindow):
         self.master_track_widget.dial_pressed.connect(self.capture_master_pan)
         self.master_track_widget.fx_bypass_toggled.connect(self.on_master_bypass_toggled)
         
-        # Sticky Master on Top
         left_panel_layout.addWidget(self.master_track_widget)
 
         # Scroll Area for Tracks
@@ -196,24 +237,37 @@ class MainWindow(QMainWindow):
         
         # 1. Custom Horizontal Scrollbar (Top)
         self.h_scrollbar = QScrollBar(Qt.Horizontal)
-        self.h_scrollbar.setFixedHeight(20)
+        self.h_scrollbar.setFixedHeight(15)
         self.right_layout.addWidget(self.h_scrollbar)
 
         # 2. Timeline Ruler
         self.timeline = TimelineRuler()
         self.timeline.set_bpm(self.audio.bpm)
-        self.timeline.position_changed.connect(self.user_seek)
-        self.timeline.zoom_request.connect(self.perform_zoom)
-        self.timeline.drag_started.connect(self.handle_drag_started)
-        self.timeline.drag_finished.connect(self.handle_drag_finished)
+        
         self.timeline_scroll = QScrollArea()
         self.timeline_scroll.setWidgetResizable(True)
         self.timeline_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.timeline_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.timeline_scroll.setFrameShape(QFrame.NoFrame)
-        self.timeline_scroll.setFixedHeight(30)
+        self.timeline_scroll.setFixedHeight(25)
         self.timeline_scroll.setWidget(self.timeline)
-        self.right_layout.addWidget(self.timeline_scroll)
+        
+        # Wrapper to align timeline with track container (compensate for V-Scrollbar)
+        timeline_wrapper = QWidget()
+        timeline_wrapper.setFixedHeight(25)
+        timeline_layout = QHBoxLayout(timeline_wrapper)
+        timeline_layout.setContentsMargins(0, 0, 0, 0)
+        timeline_layout.setSpacing(0)
+        timeline_layout.addWidget(self.timeline_scroll)
+        
+        # Spacer
+        sb_width = self.style().pixelMetric(QStyle.PM_ScrollBarExtent)
+        self.timeline_spacer = QWidget()
+        self.timeline_spacer.setFixedWidth(sb_width)
+        self.timeline_spacer.setFixedHeight(25)
+        timeline_layout.addWidget(self.timeline_spacer)
+        
+        self.right_layout.addWidget(timeline_wrapper)
 
         # 3. Track Container (for grid lines and holding lanes)
         self.right_scroll = QScrollArea()
@@ -250,91 +304,13 @@ class MainWindow(QMainWindow):
         splitter.setStretchFactor(1, 1)
         splitter.setSizes([340, 1000])
 
-        self.sync_scrollbars_custom()
-
-        # Initialize Track Manager
-        self.track_manager = TrackManager(
-            self, 
-            self.audio, 
-            self.undo_stack, 
-            self.timeline, 
-            self.left_layout, 
-            self.right_inner_layout, 
-            self.btn_add_track,
-            self.track_container
-        )
-        
-        # Connect Grid Painting
-        self.track_manager.track_container = self.track_container
-
-        # Initialize Logic States from UI Defaults
-        # (Directly set values to match UI, do not push to undo stack)
-        self.audio.set_looping(self.ribbon.btn_loop.isChecked())
-        self.track_manager.set_snap_enabled(self.ribbon.chk_snap.isChecked())
-        
-        # Connect Loading Signals
-        self.track_manager.loading_started.connect(lambda: self.ribbon.show_loading("Loading Project..."))
-        self.track_manager.loading_progress.connect(self.ribbon.update_loading)
-        self.track_manager.loading_finished.connect(self.on_project_loaded)
-        self.track_manager.status_update.connect(self.ribbon.set_status)
-        
-        # Connect Selection (Legacy/Other usage?)
-        # self.track_manager.track_selected.connect(...)
-
     def on_project_loaded(self):
         self.ribbon.hide_loading()
-        self.zoom_to_fit()
-        
-    def zoom_to_fit(self):
-        # Calculate max duration from tracks
-        max_duration = 0
-        for track in self.audio.tracks:
-            for clip in track.clips:
-                end = clip.start_time + clip.duration
-                if end > max_duration: max_duration = end
-        
-        if max_duration <= 0: max_duration = 60 # Default if empty
-        
-        # Get available width
-        available_width = self.right_scroll.viewport().width() - 50 # padding
-        if available_width <= 0: available_width = 800
-        
-        # Calculate required pixels per second
-        required_pps = available_width / max_duration
-        
-        # Clamp
-        required_pps = max(1.0, min(1000.0, required_pps))
-        
-        # Apply
-        self.timeline.set_zoom(required_pps)
-        self.update_zoom(required_pps)
-        self.right_scroll.horizontalScrollBar().setValue(0)
-
-
-    def sync_scrollbars(self):
-        # Sync Vertical Scroll
-        self.left_scroll.verticalScrollBar().valueChanged.connect(
-            self.right_scroll.verticalScrollBar().setValue
-        )
-        self.right_scroll.verticalScrollBar().valueChanged.connect(
-            self.left_scroll.verticalScrollBar().setValue
-        )
-
-        # Sync Horizontal Scroll
-        self.right_scroll.horizontalScrollBar().valueChanged.connect(
-            self.timeline_scroll.horizontalScrollBar().setValue
-        )
-        self.timeline_scroll.horizontalScrollBar().valueChanged.connect(
-            self.right_scroll.horizontalScrollBar().setValue
-        )
+        self.viewport_controller.zoom_to_fit()
 
     def update_zoom(self, px_per_sec):
-        self.track_manager.update_zoom(px_per_sec)
-            
-        # Update playhead position visually
-        current_time = self.audio.get_playhead_time()
-        x_pixel = int(current_time * px_per_sec)
-        self.update_playhead_visuals(x_pixel, scroll_to_view=False)
+        # Delegated to ViewportController
+        self.viewport_controller.update_zoom(px_per_sec)
 
     def update_global_duration(self):
         self.track_manager.update_global_duration()
@@ -360,27 +336,18 @@ class MainWindow(QMainWindow):
         # Heuristic feedback
         if can_undo: self.ribbon.set_status("Action Performed")
 
-
-
-
     def toggle_playback(self):
         if self.audio.is_playing:
             self.pause_playback()
         else:
-            # If at end (rough check), restart from cursor or 0
-            # if self.audio.get_playhead_time() >= self.timeline.duration:
-            #    self.audio.playhead = 0
-            
             self.audio.start_playback()
             self.ribbon.set_play_state(True)
             self.ui_timer.start()
-
 
     def pause_playback(self):
         self.audio.pause_playback()
         self.ribbon.set_play_state(False)
         self.ui_timer.stop()
-
 
     def stop_playback(self):
         self.audio.stop_playback()
@@ -391,27 +358,7 @@ class MainWindow(QMainWindow):
         cursor_x_pixels = int(getattr(self, 'edit_cursor_time', 0.0) * self.timeline.pixels_per_second)
         self.audio.set_playhead(cursor_x_pixels, px_per_second=self.timeline.pixels_per_second)
 
-        self.update_playhead_visuals(cursor_x_pixels, scroll_to_view=False)
-        # self.right_scroll.horizontalScrollBar().setValue(0) # Remove reset to 0
-
-
-    def user_seek(self, x_pixels):
-        # Check if we should clamp to viewport (if dragging)
-        if hasattr(self.timeline, 'is_dragging') and self.timeline.is_dragging:
-             viewport_start = self.right_scroll.horizontalScrollBar().value()
-             viewport_end = viewport_start + self.right_scroll.viewport().width()
-             x_pixels = max(viewport_start, min(x_pixels, viewport_end))
-
-        # Convert pixels to time using current zoom
-        time_sec = x_pixels / self.timeline.pixels_per_second
-        
-        # KEY CHANGE: User seek primarily sets the EDIT CURSOR
-        self.edit_cursor_time = time_sec
-        self.timeline.set_cursor(x_pixels)
-        
-        self.audio.set_playhead(x_pixels, px_per_second=self.timeline.pixels_per_second)
-        self.update_playhead_visuals(x_pixels, scroll_to_view=False)
-
+        self.viewport_controller.update_playhead_visuals(cursor_x_pixels, scroll_to_view=False)
 
     def update_ui(self):
         current_time = self.audio.get_playhead_time()
@@ -421,139 +368,20 @@ class MainWindow(QMainWindow):
              self.update_global_duration()
              
         x_pixel = int(current_time * self.timeline.pixels_per_second)
-        self.update_playhead_visuals(x_pixel, scroll_to_view=True)
+        self.viewport_controller.update_playhead_visuals(x_pixel, scroll_to_view=True)
         
         self.track_manager.update_meters()
 
-    def update_playhead_visuals(self, x, scroll_to_view=False):
-        self.timeline.set_playhead(x)
-        self.track_manager.update_playhead_visuals(x)
-            
-        if scroll_to_view:
-             viewport_width = self.right_scroll.viewport().width()
-             current_scroll = self.right_scroll.horizontalScrollBar().value()
-             
-             # "Page" logic: If playhead goes off screen to the right, jump view to it
-             # This aligns the playhead to the beginning (left) of the new view
-             if x > current_scroll + viewport_width:
-                 target_scroll = x
-                 self.right_scroll.horizontalScrollBar().setValue(int(target_scroll))
-
     def zoom_in_step(self):
-        self.perform_zoom_step(1)
+        self.viewport_controller.perform_zoom_step(1)
 
     def zoom_out_step(self):
-        self.perform_zoom_step(-1)
-
-    def perform_zoom_step(self, direction):
-        # Zoom to center of viewport
-        viewport_width = self.right_scroll.viewport().width()
-        center_x_screen = viewport_width / 2
-        
-        current_scroll = self.right_scroll.horizontalScrollBar().value()
-        current_zoom = self.timeline.pixels_per_second
-        
-        # Calculate time at center
-        absolute_x = current_scroll + center_x_screen
-        time_at_center = absolute_x / current_zoom
-        
-        # Calculate new zoom
-        if direction > 0:
-            new_zoom = current_zoom * 1.5
-        else:
-            new_zoom = current_zoom / 1.5
-        
-        new_zoom = max(1.0, min(1000.0, new_zoom))
-        
-        if new_zoom == current_zoom: return
-
-        # Apply new zoom
-        self.timeline.set_zoom(new_zoom)
-        self.update_zoom(new_zoom)
-        
-        # Calculate new scroll to keep time_at_center at center_x_screen
-        new_absolute_x = time_at_center * new_zoom
-        new_scroll = int(new_absolute_x - center_x_screen)
-        
-        self.right_scroll.horizontalScrollBar().setValue(new_scroll)
-
-    def handle_timeline_zoom(self, delta, global_pos):
-        self.perform_zoom(delta, global_pos)
+        self.viewport_controller.perform_zoom_step(-1)
 
     def perform_zoom(self, delta, global_pos):
-        # Map global pos to viewport
-        viewport_pos = self.right_scroll.viewport().mapFromGlobal(global_pos.toPoint())
-        mouse_x_screen = viewport_pos.x()
-        
-        current_scroll = self.right_scroll.horizontalScrollBar().value()
-        current_zoom = self.timeline.pixels_per_second
-        
-        # Calculate time under mouse
-        absolute_x = current_scroll + mouse_x_screen
-        time_under_mouse = absolute_x / current_zoom
-        
-        # Calculate new zoom
-        if delta > 0:
-            new_zoom = current_zoom * 1.5
-        else:
-            new_zoom = current_zoom / 1.5
-        
-        new_zoom = max(1.0, min(1000.0, new_zoom))
-        
-        if new_zoom == current_zoom: return
-
-        # Apply new zoom
-        self.timeline.set_zoom(new_zoom)
-        self.update_zoom(new_zoom)
-        
-        # Calculate new scroll to keep time_under_mouse at mouse_x_screen
-        new_absolute_x = time_under_mouse * new_zoom
-        new_scroll = int(new_absolute_x - mouse_x_screen)
-        
-        self.right_scroll.horizontalScrollBar().setValue(new_scroll)
-
-    def sync_scrollbars_custom(self):
-        # 1. Vertical Sync: Left Scroll <-> Right Scroll
-        self.left_scroll.verticalScrollBar().valueChanged.connect(
-            self.right_scroll.verticalScrollBar().setValue
-        )
-        self.right_scroll.verticalScrollBar().valueChanged.connect(
-            self.left_scroll.verticalScrollBar().setValue
-        )
-        
-        # 2. Horizontal Sync: Top HBuffer <-> Timeline Scroll <-> Right Scroll
-        # We process 'valueChanged' for 2-way sync
-        
-        # Function to update others without loop
-        def sync_h(val):
-            if self.timeline_scroll.horizontalScrollBar().value() != val:
-                self.timeline_scroll.horizontalScrollBar().setValue(val)
-            if self.right_scroll.horizontalScrollBar().value() != val:
-                self.right_scroll.horizontalScrollBar().setValue(val)
-            if self.h_scrollbar.value() != val:
-                self.h_scrollbar.setValue(val)
-                
-        self.h_scrollbar.valueChanged.connect(sync_h)
-        self.timeline_scroll.horizontalScrollBar().valueChanged.connect(sync_h)
-        self.right_scroll.horizontalScrollBar().valueChanged.connect(sync_h)
-        
-        # IMPORTANT: Sync RANGES too
-        # When timeline/track grows, scrollbar range must update
-        def update_range(min_val, max_val):
-             self.h_scrollbar.setRange(min_val, max_val)
-             self.h_scrollbar.setPageStep(self.right_scroll.horizontalScrollBar().pageStep())
-             
-        self.right_scroll.horizontalScrollBar().rangeChanged.connect(update_range)
-
-    def update_zoom(self, px_per_sec):
-        # Propagate zoom to track manager/lanes
-        self.track_manager.update_zoom(px_per_sec)
+        self.viewport_controller.perform_zoom(delta, global_pos)
 
     def open_master_fx(self):
-        # We need a unique ID for master track window
-        # TrackManager usually takes a lane_index.
-        # We can reuse TrackManager logic or handle it here.
-        # Let's ask TrackManager to handle it with a special ID or method.
         self.track_manager.open_master_fx_window(self.audio.master_track)
 
     def capture_master_vol(self):
@@ -594,194 +422,33 @@ class MainWindow(QMainWindow):
         cmd = ToggleFXBypassCommand(self.track_manager, -1, checked)
         self.undo_stack.push(cmd)
 
-    def handle_drag_started(self):
-        self.scroll_timer.start()
-
-    def handle_drag_finished(self):
-        self.scroll_timer.stop()
-
-    def check_edge_scroll(self):
-        # Determine global mouse pos
-        global_mouse = self.cursor().pos()
-        
-        # Map to timeline viewport
-        viewport = self.timeline_scroll.viewport()
-        mouse_pos = viewport.mapFromGlobal(global_mouse)
-        
-        # Define areas
-        scroll_margin = 50
-        scroll_step = 20
-        
-        current_scroll = self.right_scroll.horizontalScrollBar().value()
-        viewport_width = viewport.width()
-        
-        new_scroll = current_scroll
-        
-        # Check Right Edge
-        if mouse_pos.x() > viewport_width - scroll_margin:
-            # Scroll Right
-            new_scroll += scroll_step
-            
-        # Check Left Edge (of the track container viewport)
-        elif mouse_pos.x() < scroll_margin:
-            # Scroll Left
-            new_scroll -= scroll_step
-        
-        if new_scroll != current_scroll:
-            new_scroll = max(0, new_scroll)
-            self.right_scroll.horizontalScrollBar().setValue(new_scroll)
-            
-            # Update Playhead to match new position under mouse
-            new_absolute_x = new_scroll + mouse_pos.x()
-            new_absolute_x = max(0, new_absolute_x)
-            
-            # Signal user seek
-            self.user_seek(new_absolute_x)
-
-
     def eventFilter(self, source, event):
         if event.type() == QEvent.Wheel:
             if event.modifiers() & Qt.ControlModifier:
                 # Intercept Zoom here to prevent ScrollArea from scrolling
                 delta = event.angleDelta().y()
-                self.perform_zoom(delta, event.globalPosition())
+                self.viewport_controller.perform_zoom(delta, event.globalPosition())
                 return True # Consume event
         return super().eventFilter(source, event)
 
     def wheelEvent(self, event):
         if event.modifiers() & Qt.ControlModifier:
             delta = event.angleDelta().y()
-            self.perform_zoom(delta, event.globalPosition())
+            self.viewport_controller.perform_zoom(delta, event.globalPosition())
             event.accept()
         else:
             super().wheelEvent(event)
 
-    def update_dirty_state(self):
-        is_dirty = self.undo_stack.current_command != self.clean_command
-        
-        title = "Python Qt DAW"
-        if self.current_project_path:
-            title += f" - {os.path.basename(self.current_project_path)}"
-        else:
-            title += " - Untitled"
-            
-        if is_dirty:
-            title = "* " + title
-            
-        self.setWindowTitle(title)
-
-    def check_save_changes(self):
-        is_dirty = self.undo_stack.current_command != self.clean_command
-        if not is_dirty:
-            return True
-            
-        reply = QMessageBox.question(
-            self, 
-            "Unsaved Changes", 
-            "You have unsaved changes. Do you want to save them?",
-            QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel
-        )
-        
-        if reply == QMessageBox.Save:
-            self.on_save_project()
-            # Check if save was successful (clean command updated)
-            return self.undo_stack.current_command == self.clean_command
-        elif reply == QMessageBox.Discard:
-            return True
-        else:
-            return False
-
-    def on_new_project(self):
-        if not self.check_save_changes():
-            return
-            
-        self.track_manager.clear_all_tracks()
-        self.undo_stack.clear()
-        self.current_project_path = None
-        self.clean_command = None
-        self.update_dirty_state()
-
     def closeEvent(self, event):
-        if self.check_save_changes():
+        if self.project_io.check_save_changes():
             event.accept()
         else:
             event.ignore()
-
-    # setup_menu removed
-
 
     def switch_theme(self, theme_name):
         app = QApplication.instance()
         ThemeManager.save_theme(theme_name)
         ThemeManager.apply_theme(app, theme_name)
-
-    def on_save_project(self):
-        if self.current_project_path:
-            success = self.project_manager.save_project(self.current_project_path, self.audio)
-            if success:
-                self.ribbon.show_loading(f"Saved to {os.path.basename(self.current_project_path)}")
-                QTimer.singleShot(2000, self.ribbon.hide_loading)
-                self.clean_command = self.undo_stack.current_command
-                self.update_dirty_state()
-            else:
-                QMessageBox.critical(self, "Error", "Failed to save project.")
-        else:
-            self.on_save_project_as()
-
-    def on_save_project_as(self):
-        file_path, _ = QFileDialog.getSaveFileName(self, "Save Project As", "", "Project Files (*.pydaw)")
-        if file_path:
-            if not file_path.endswith(".pydaw"):
-                file_path += ".pydaw"
-            
-            self.current_project_path = file_path
-            success = self.project_manager.save_project(file_path, self.audio)
-            
-            if success:
-                self.setWindowTitle(f"Python Qt DAW - {os.path.basename(file_path)}")
-                QMessageBox.information(self, "Success", f"Project saved to {file_path}")
-                self.clean_command = self.undo_stack.current_command
-                self.update_dirty_state()
-            else:
-                QMessageBox.critical(self, "Error", "Failed to save project.")
-
-    def on_open_project(self):
-        if not self.check_save_changes():
-            return
-
-        file_path, _ = QFileDialog.getOpenFileName(self, "Open Project", "", "Project Files (*.pydaw)")
-        if file_path:
-            # Use TrackManager's async loader
-            self.track_manager.load_project(file_path)
-            self.current_project_path = file_path
-            self.undo_stack.clear()
-            self.clean_command = None
-            self.update_dirty_state()
-
-    def on_export_audio(self):
-        file_path, _ = QFileDialog.getSaveFileName(self, "Export Audio", "", "WAV Files (*.wav)")
-        if file_path:
-            if not file_path.endswith(".wav"):
-                file_path += ".wav"
-            
-            # Determine duration
-            duration = self.timeline.duration
-            
-            max_end = 0
-            for track in self.audio.tracks:
-                for clip in track.clips:
-                    end = clip.start_time + clip.duration
-                    if end > max_end: max_end = end
-            
-            if max_end == 0:
-                QMessageBox.warning(self, "Warning", "Project is empty.")
-                return
-
-            # Add a small tail (e.g. 1 second)
-            export_duration = max_end + 1.0
-            
-            self.audio.export_audio(file_path, export_duration)
-            QMessageBox.information(self, "Success", f"Audio exported to {file_path}")
 
     def on_bpm_changed(self, new_bpm):
         old_bpm = self.audio.bpm
@@ -809,19 +476,19 @@ class MainWindow(QMainWindow):
              self.track_container.set_bpm(new_bpm)
         self.track_manager.set_bpm(new_bpm) 
              
-        self.update_dirty_state()
+        self.project_io.update_dirty_state()
 
     def on_snap_toggled(self, enabled):
         # Prevent recursion if updated programmatically
-        if self.ribbon.chk_snap.isChecked() != enabled: return 
+        if self.ribbon.btn_snap.isChecked() != enabled: return 
         
         cmd = ToggleSnapCommand(self, enabled)
         self.undo_stack.push(cmd)
 
     def perform_snap_toggle(self, enabled):
-        self.ribbon.chk_snap.blockSignals(True)
-        self.ribbon.chk_snap.setChecked(enabled)
-        self.ribbon.chk_snap.blockSignals(False)
+        self.ribbon.btn_snap.blockSignals(True)
+        self.ribbon.btn_snap.setChecked(enabled)
+        self.ribbon.btn_snap.blockSignals(False)
         self.track_manager.set_snap_enabled(enabled)
 
     def on_loop_toggled(self, enabled):

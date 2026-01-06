@@ -2,7 +2,7 @@
 from PySide6.QtWidgets import QWidget, QVBoxLayout
 from PySide6.QtGui import QShortcut, QKeySequence
 from PySide6.QtCore import Qt
-from ui.effects_rack import EffectsRack
+from ui.effects.rack import EffectsRack
 
 class EffectsWindow(QWidget):
     def __init__(self, track_data, undo_stack, main_window, parent=None):
@@ -50,7 +50,7 @@ class EffectsWindow(QWidget):
         
         # Save (Ctrl+S)
         self.shortcut_save = QShortcut(QKeySequence("Ctrl+S"), self)
-        self.shortcut_save.activated.connect(self.main_window.on_save_project)
+        self.shortcut_save.activated.connect(self.main_window.project_io.on_save_project)
         self.shortcut_save.setContext(Qt.WindowShortcut)
         
     def closeEvent(self, event):

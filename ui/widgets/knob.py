@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import QDial, QMenu
-from PySide6.QtGui import QAction, QPainter, QPen, QColor, QPainterPath
+from PySide6.QtGui import QAction, QPainter, QPen, QColor, QPainterPath, QPalette
 from PySide6.QtCore import Qt, QRectF
 
 class DraggableDial(QDial):
@@ -60,6 +60,7 @@ class ModernKnobChunky(BaseModernKnob):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
+        palette = self.palette()
 
         w, h = self.width(), self.height()
         side = min(w, h)
@@ -73,7 +74,9 @@ class ModernKnobChunky(BaseModernKnob):
 
         # Background Arc
         painter.setBrush(Qt.NoBrush)
-        painter.setPen(QPen(QColor("#222222"), 10, Qt.SolidLine, Qt.FlatCap))
+        # Use darker window color
+        bg_color = palette.color(QPalette.Window).darker(150)
+        painter.setPen(QPen(bg_color, 10, Qt.SolidLine, Qt.FlatCap))
         path_bg = QPainterPath()
         path_bg.arcMoveTo(QRectF(-40, -40, 80, 80), start_angle)
         path_bg.arcTo(QRectF(-40, -40, 80, 80), start_angle, span_angle)
@@ -82,15 +85,19 @@ class ModernKnobChunky(BaseModernKnob):
         # Active Arc
         is_bipolar = self.minimum() < 0 and self.maximum() > 0
         
+        # Colors - Semantic (Keep distinct or use Highlight)
+        # We'll use Highlight for standard, and custom for bipolar to distinguish L/R
+        active_color = palette.color(QPalette.Highlight)
+        
         if is_bipolar:
             # Bipolar Mode (Center Zero)
             center_angle = start_angle + (span_angle / 2)
             current_angle = start_angle + (span_angle * norm)
             draw_span = current_angle - center_angle
             
-            # Colors: Left (val < 0) = Teal, Right (val > 0) = Orange
+            # Colors: Left (val < 0) = Orange, Right (val > 0) = Cyan/Blue
             # Note: norm < 0.5 means Left, norm > 0.5 means Right
-            color = QColor("#339999") if norm < 0.5 else QColor("#ffc107") # Teal vs Orange
+            color = QColor("#ff8800") if norm < 0.5 else active_color # Use Highlight for right/positive
             
             if abs(norm - 0.5) > 0.01: # Don't draw if at center
                 painter.setPen(QPen(color, 10, Qt.SolidLine, Qt.FlatCap))
@@ -102,7 +109,7 @@ class ModernKnobChunky(BaseModernKnob):
         else:
             # Standard Unipolar Mode
             if norm > 0:
-                painter.setPen(QPen(QColor("#ffc107"), 10, Qt.SolidLine, Qt.FlatCap))
+                painter.setPen(QPen(active_color, 10, Qt.SolidLine, Qt.FlatCap))
                 path_val = QPainterPath()
                 path_val.arcMoveTo(QRectF(-40, -40, 80, 80), start_angle)
                 path_val.arcTo(QRectF(-40, -40, 80, 80), start_angle, span_angle * norm)
@@ -110,12 +117,14 @@ class ModernKnobChunky(BaseModernKnob):
 
         # Knob Body
         painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor("#333333"))
+        # Use Button color
+        painter.setBrush(palette.color(QPalette.Button))
         painter.drawEllipse(-30, -30, 60, 60)
 
          # Indicator Bar
         painter.save()
         painter.rotate(-150 + (norm * 300))
-        painter.setBrush(QColor("#ffffff"))
+        # Use BrightText or Text for contrast
+        painter.setBrush(palette.color(QPalette.ButtonText))
         painter.drawRoundedRect(QRectF(-2.5, -25, 5, 12), 2, 2) 
         painter.restore()

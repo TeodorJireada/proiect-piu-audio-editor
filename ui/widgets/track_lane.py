@@ -1,8 +1,8 @@
 from PySide6.QtCore import Qt, QRect, Signal, QPointF
-from PySide6.QtGui import QColor, QPainter, QPen, QBrush, QPolygonF
+from PySide6.QtGui import QColor, QPainter, QPen, QBrush, QPolygonF, QPalette, QCursor, QFont
 import numpy as np
 import os
-from PySide6.QtWidgets import QFrame
+from PySide6.QtWidgets import QFrame, QApplication
 
 class TrackLane(QFrame):
     clip_moved = Signal(int, float, float) 
@@ -37,6 +37,7 @@ class TrackLane(QFrame):
         self.HANDLE_WIDTH = 10
 
         self.setMouseTracking(True)
+        self.setFocusPolicy(Qt.StrongFocus)
         self.active_tool = "MOVE"
         self.selected_clip_index = -1
 
@@ -115,6 +116,18 @@ class TrackLane(QFrame):
         self.playhead_x = x
         self.update()
 
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Shift:
+            self.setCursor(Qt.CrossCursor)
+        super().keyPressEvent(event)
+
+    def keyReleaseEvent(self, event):
+        if event.key() == Qt.Key_Shift:
+            # Refresh cursor state by triggering a move logic check
+            pos = self.mapFromGlobal(QCursor.pos())
+            self._update_cursor_at(pos)
+        super().keyReleaseEvent(event)
+
     def mousePressEvent(self, event):
         if self.is_placeholder: return
         
@@ -134,6 +147,12 @@ class TrackLane(QFrame):
             
             if clicked_clip_index != -1:
                 # Handle Clip Click
+
+                # Shift+Click to Split
+                if event.modifiers() & Qt.ShiftModifier:
+                    self.handle_split(clicked_clip_index, click_x)
+                    return
+
                 if self.active_tool == "SPLIT":
                     self.handle_split(clicked_clip_index, click_x)
                     return
@@ -245,33 +264,42 @@ class TrackLane(QFrame):
             self.update()
             
         else:
-            # Hover Logic
-            hover_cursor = Qt.ArrowCursor
-            
-            if self.active_tool == "SPLIT":
-                hover_cursor = Qt.CrossCursor
-            elif self.active_tool == "DUPLICATE":
-                hover_cursor = Qt.DragCopyCursor
-            elif self.active_tool == "DELETE":
-                hover_cursor = Qt.ForbiddenCursor
-            
-            # Only check handles if MOVE tool
-            if self.active_tool == "MOVE":
-                for clip in self.clips:
-                    start_x = int(clip['start_time'] * self.pixels_per_second)
-                    width = int(clip['duration'] * self.pixels_per_second)
-                    end_x = start_x + width
-                    
-                    if start_x <= current_x <= end_x:
-                        if current_x < start_x + self.HANDLE_WIDTH:
-                            hover_cursor = Qt.SizeHorCursor
-                        elif current_x > end_x - self.HANDLE_WIDTH:
-                            hover_cursor = Qt.SizeHorCursor
-                        else:
-                            hover_cursor = Qt.ArrowCursor 
-                        break
-            
-            self.setCursor(hover_cursor)
+            self._update_cursor_at(event.position())
+
+    def _update_cursor_at(self, pos):
+        current_x = pos.x()
+        modifiers = QApplication.keyboardModifiers()
+        
+        # Hover Logic
+        hover_cursor = Qt.ArrowCursor
+        
+        # Check Modifiers for Split (Shift)
+        if modifiers & Qt.ShiftModifier:
+            hover_cursor = Qt.CrossCursor
+        elif self.active_tool == "SPLIT":
+            hover_cursor = Qt.CrossCursor
+        elif self.active_tool == "DUPLICATE":
+            hover_cursor = Qt.DragCopyCursor
+        elif self.active_tool == "DELETE":
+            hover_cursor = Qt.ForbiddenCursor
+        
+        # Only check handles if MOVE tool and Shift not held
+        if self.active_tool == "MOVE" and not (modifiers & Qt.ShiftModifier):
+            for clip in self.clips:
+                start_x = int(clip['start_time'] * self.pixels_per_second)
+                width = int(clip['duration'] * self.pixels_per_second)
+                end_x = start_x + width
+                
+                if start_x <= current_x <= end_x:
+                    if current_x < start_x + self.HANDLE_WIDTH:
+                        hover_cursor = Qt.SizeHorCursor
+                    elif current_x > end_x - self.HANDLE_WIDTH:
+                        hover_cursor = Qt.SizeHorCursor
+                    else:
+                        hover_cursor = Qt.ArrowCursor 
+                    break
+        
+        self.setCursor(hover_cursor)
 
     def mouseReleaseEvent(self, event):
         if self.dragging_clip_index != -1:
@@ -299,6 +327,8 @@ class TrackLane(QFrame):
 
     def paintEvent(self, event):
         painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        palette = self.palette()
         
         # Draw Clips
         mid_y = self.height() / 2 
@@ -311,7 +341,18 @@ class TrackLane(QFrame):
             # Top border 1px lower to be visible
             clip_rect = QRect(start_x, 1, width, self.height() - 2)
             
-            painter.setBrush(QBrush(QColor(30, 30, 40))) 
+            # Use Palette for base background of clip? 
+            # Actually clips are usually colored distinctively. 
+            # But let's use AlternateBase if we wanted theme compliance, 
+            # though here we have custom clip colors.
+            # We'll stick to a dark background that matches the theme "Button" or "Base"
+            # But wait, clips have transparency? 
+            # The previous code used QColor(30, 30, 40) which is very close to Base/Window.
+            # Let's use QPalette.Button for the clip body background if opaque.
+            
+            # Use clip color, but maybe darken it for background?
+            # Or use Theme Base.
+            painter.setBrush(QBrush(palette.color(QPalette.AlternateBase))) 
             
             # Determine Color (Highlight if selected)
             base_color = QColor(clip['color'])
@@ -402,14 +443,18 @@ class TrackLane(QFrame):
                          painter.drawPolyline(points_bottom)
 
             # Draw Clip Name Overlay
-            painter.setPen(QColor(255, 255, 255))
+            painter.setPen(palette.color(QPalette.Text))
             display_name = os.path.basename(clip['name'])
             painter.drawText(clip_rect.adjusted(5, 5, 0, 0), Qt.AlignLeft | Qt.AlignTop, display_name)
 
         # Draw Playhead
-        painter.setPen(QPen(QColor(255, 50, 50, 180), 1))
-        playhead_int = int(self.playhead_x)
-        painter.drawLine(playhead_int, 0, playhead_int, self.height())
+        # Use Highlight color but make it opaque/solid?
+        playhead_color = palette.color(QPalette.BrightText) # Usually Red or bright in dark themes
+        # If BrightText is not red enough, fallback to Highlight?
+        # ThemeManager sets BrightText to Red (255,0,0). Perfect.
+        painter.setPen(QPen(playhead_color, 1))
+        
+        painter.drawLine(QPointF(self.playhead_x, 0), QPointF(self.playhead_x, self.height()))
 
     def contextMenuEvent(self, event):
         pass # Disable context menu

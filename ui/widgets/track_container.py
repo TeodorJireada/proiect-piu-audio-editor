@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import QWidget
-from PySide6.QtGui import QPainter, QColor
+from PySide6.QtGui import QPainter, QColor, QPalette
 from PySide6.QtCore import Qt
 
 class TrackContainer(QWidget):
@@ -31,9 +31,11 @@ class TrackContainer(QWidget):
 
     def paintEvent(self, event):
         painter = QPainter(self)
+        palette = self.palette()
         
         # Draw Background Grid
-        painter.setPen(QColor(40, 40, 40))
+        # We don't draw a filled rect here because the background color is handled by stylesheet on QWidget#TrackContainer
+        # But we do draw lines.
         
         # Calculations
         seconds_per_beat = 60 / getattr(self, "bpm", 120)
@@ -53,6 +55,12 @@ class TrackContainer(QWidget):
 
         beats_total = int(self.duration / seconds_per_beat) + 1
         
+        major_color = palette.color(QPalette.WindowText)
+        major_color.setAlpha(100)
+        
+        minor_color = palette.color(QPalette.WindowText)
+        minor_color.setAlpha(40)
+        
         for beat_idx in range(0, beats_total, beat_interval):
              x = int(beat_idx * pixels_per_beat)
              if x > self.width(): break
@@ -60,8 +68,8 @@ class TrackContainer(QWidget):
              is_bar_start = (beat_idx % 4 == 0)
              
              if is_bar_start:
-                 painter.setPen(QColor(80, 80, 80)) # Major line
+                 painter.setPen(major_color) # Major line
              else:
-                 painter.setPen(QColor(50, 50, 50)) # Minor line
+                 painter.setPen(minor_color) # Minor line
                  
              painter.drawLine(x, 0, x, self.height())

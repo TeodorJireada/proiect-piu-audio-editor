@@ -1,7 +1,7 @@
 
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QComboBox, QListWidget, QListWidgetItem, QLabel, QSizePolicy, QAbstractItemView
 from PySide6.QtCore import Qt, Signal, QSize
-from ui.widgets.effect_unit import EffectUnit
+from ui.effects.unit import EffectUnit
 
 from core.effects.eq import EQ3Band
 from core.effects.delay import SimpleDelay

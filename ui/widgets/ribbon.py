@@ -1,11 +1,62 @@
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QPushButton, QButtonGroup, QProgressBar, QLabel, QSpacerItem, QSizePolicy, QToolButton, QDialog, QColorDialog, QSpinBox, QCheckBox, QGridLayout
-from PySide6.QtCore import Signal, QSize, Qt, QTimer
-from PySide6.QtGui import QIcon, QFontMetrics
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QPushButton, QButtonGroup, QProgressBar, QLabel, QSpacerItem, QSizePolicy, QToolButton, QDialog, QColorDialog, QSpinBox, QCheckBox, QGridLayout, QMenu
+from PySide6.QtCore import Signal, QSize, Qt, QTimer, QEvent
+from PySide6.QtGui import QIcon, QFontMetrics, QAction
+
+class DraggableSpinBox(QSpinBox):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setButtonSymbols(QSpinBox.NoButtons)
+        self.setCursor(Qt.SizeVerCursor)
+        self.lineEdit().installEventFilter(self)
+        self.last_y = 0
+        self.is_dragging = False
+        self.drag_start_pos = None
+
+    def eventFilter(self, source, event):
+        if source == self.lineEdit():
+            if event.type() == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
+                self.is_dragging = False
+                self.drag_start_pos = event.globalPosition().toPoint()
+                self.last_y = event.globalPosition().y()
+            
+            elif event.type() == QEvent.MouseMove and (event.buttons() & Qt.LeftButton):
+                if not self.drag_start_pos: return False
+                
+                # Check for drag threshold
+                if not self.is_dragging:
+                    delta_move = (event.globalPosition().toPoint() - self.drag_start_pos).manhattanLength()
+                    if delta_move > 5:
+                        self.is_dragging = True
+                
+                if self.is_dragging:
+                    delta_y = self.last_y - event.globalPosition().y()
+                    if abs(delta_y) >= 2: # Sensitivity
+                        steps = int(delta_y / 2)
+                        self.setValue(self.value() + steps)
+                        self.last_y = event.globalPosition().y()
+                    return True # Consume event
+            
+            elif event.type() == QEvent.MouseButtonRelease:
+                if self.is_dragging:
+                    self.is_dragging = False
+                    return True # Consume event
+        
+        return super().eventFilter(source, event)
+
+    def contextMenuEvent(self, event):
+        menu = QMenu(self)
+        for bpm in range(100, 210, 10):
+            action = QAction(f"{bpm} BPM", self)
+            action.triggered.connect(lambda checked=False, val=bpm: self.setValue(val))
+            menu.addAction(action)
+        
+        menu.exec(event.globalPos())
 
 class Ribbon(QFrame):
     new_clicked = Signal()
     open_clicked = Signal()
     save_clicked = Signal()
+    save_as_clicked = Signal()
     export_clicked = Signal()
     theme_switched = Signal(str) # "DARK", "HIGH_CONTRAST"
     bpm_changed = Signal(int)
@@ -69,27 +120,40 @@ class Ribbon(QFrame):
             return btn
 
         # --- LEFT GROUP ---
-        btn_new = create_text_btn("New", "New Project")
-        btn_new.clicked.connect(self.new_clicked.emit)
-        left_layout.addWidget(btn_new)
-
-        btn_open = create_text_btn("Open", "Open Project")
-        btn_open.clicked.connect(self.open_clicked.emit)
-        left_layout.addWidget(btn_open)
-
-        btn_save = create_text_btn("Save", "Save Project (Ctrl+S)")
-        btn_save.clicked.connect(self.save_clicked.emit)
-        left_layout.addWidget(btn_save)
-
-        btn_export = create_text_btn("Export", "Export Audio (WAV)")
-        btn_export.clicked.connect(self.export_clicked.emit)
-        left_layout.addWidget(btn_export)
+        btn_file = create_text_btn("File", "File Operations")
+        
+        file_menu = QMenu(btn_file)
+        
+        a_new = QAction("New Project", self)
+        a_new.triggered.connect(self.new_clicked.emit)
+        file_menu.addAction(a_new)
+        
+        a_open = QAction("Open Project", self)
+        a_open.triggered.connect(self.open_clicked.emit)
+        file_menu.addAction(a_open)
+        
+        file_menu.addSeparator()
+        
+        a_save = QAction("Save Project (Ctrl+S)", self)
+        a_save.triggered.connect(self.save_clicked.emit)
+        file_menu.addAction(a_save)
+        
+        a_save_as = QAction("Save Project As... (Ctrl+Shift+S)", self)
+        a_save_as.triggered.connect(self.save_as_clicked.emit)
+        file_menu.addAction(a_save_as)
+        
+        file_menu.addSeparator()
+        
+        a_export = QAction("Export Audio (WAV)", self)
+        a_export.triggered.connect(self.export_clicked.emit)
+        file_menu.addAction(a_export)
+        
+        btn_file.setMenu(file_menu)
+        left_layout.addWidget(btn_file)
 
         self._add_separator(left_layout)
         
         # Theme
-        from PySide6.QtWidgets import QMenu
-        from PySide6.QtGui import QAction
         
         btn_theme = create_text_btn("Theme", "Switch Theme")
         theme_menu = QMenu(btn_theme)
@@ -110,7 +174,7 @@ class Ribbon(QFrame):
         
         # BPM
         lbl_bpm = QLabel("BPM:")
-        self.spin_bpm = QSpinBox()
+        self.spin_bpm = DraggableSpinBox()
         self.spin_bpm.setRange(20, 300)
         self.spin_bpm.setValue(120)
         self.spin_bpm.setFixedWidth(60)
@@ -120,11 +184,19 @@ class Ribbon(QFrame):
         center_layout.addWidget(self.spin_bpm)
         
         # Snap
-        self.chk_snap = QCheckBox("Snap")
-        self.chk_snap.setChecked(True) # Default ON
-        self.chk_snap.toggled.connect(self.snap_toggled.emit)
+        self.btn_snap = create_text_btn("Snap", "Toggle Snap to Grid")
+        self.btn_snap.setCheckable(True)
+        self.btn_snap.setChecked(True) # Default ON
+        self.btn_snap.clicked.connect(lambda c: self.snap_toggled.emit(c))
+        self.btn_snap.setStyleSheet("""
+            QPushButton:checked {
+                background-color: #4466aa;
+                border-radius: 4px;
+            }
+        """)
+        
         center_layout.addSpacing(10)
-        center_layout.addWidget(self.chk_snap)
+        center_layout.addWidget(self.btn_snap)
         
         self._add_separator(center_layout)
 
