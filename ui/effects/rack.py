@@ -9,7 +9,6 @@ from core.effects.distortion import Distortion
 from core.commands import AddEffectCommand, RemoveEffectCommand, ReorderEffectCommand
 
 class EffectsListWidget(QListWidget):
-    """Custom ListWidget to handle drag and drop of effects"""
     reorder_requested = Signal(int, int) # old_index, new_index
 
     def __init__(self, parent=None):
@@ -19,7 +18,6 @@ class EffectsListWidget(QListWidget):
         self.setAcceptDrops(True)
         self.setDragEnabled(True)
         self.setDropIndicatorShown(True)
-        # Style to make it look clean
         self.setStyleSheet("""
             QListWidget {
                 background-color: transparent;
@@ -45,22 +43,12 @@ class EffectsListWidget(QListWidget):
             
         old_index = self.row(source_item)
         
-        # Calculate drop index
-        # This is tricky in QListWidget. simpler to let super() handle it?
-        # If we let super handle it, the UI updates but model is out of sync.
-        # We want to intercept, calculate where it WOULD go, and emit signal.
-        
         # Determine index from position
         pos = event.position().toPoint()
         target_item = self.itemAt(pos)
         
         if target_item:
             new_index = self.row(target_item)
-            # Logic for above/below?
-            # QListWidget usually drops *before* item if not careful.
-            # Visual indicator handles this.
-            
-            # Use View's drop logic to get proposed action
             drop_indicator_pos = self.dropIndicatorPosition()
             if drop_indicator_pos == QAbstractItemView.BelowItem:
                  new_index += 1
@@ -69,25 +57,15 @@ class EffectsListWidget(QListWidget):
         else:
             new_index = self.count() - 1 # End of list
             
-        # If dropping at same index or invalid
         if new_index == old_index:
             event.ignore()
             return
-
-        # Adjust for removal
-        # If we move item 0 to position 2 (insert after 1):
-        # [0, 1, 2] -> 0 moves. new list: [1, 2] -> insert at 2.
-        # If target index > source index, we must subtract 1 because source is removed first?
-        # Logic: 
-        # Source i=0. Target i=2 (Below item 1).
-        # Pop 0. List is [1, 2]. Insert at 2 (end). Result [1, 2, 0]. Correct.
-        # However, new_index from QListWidget accounts for current state.
         
         if new_index > old_index:
              new_index -= 1
 
         self.reorder_requested.emit(old_index, new_index)
-        event.ignore() # Don't let QListWidget do it locally. Command triggers refresh.
+        event.ignore()
 
 class EffectsRack(QWidget):
     effects_changed = Signal() 
@@ -116,7 +94,6 @@ class EffectsRack(QWidget):
         header.addWidget(self.combo_add)
         self.main_layout.addLayout(header)
         
-        # Scroll Area REPLACED by ListWidget
         self.list_widget = EffectsListWidget()
         self.list_widget.reorder_requested.connect(self.on_reorder_effect)
         
@@ -157,18 +134,16 @@ class EffectsRack(QWidget):
             lbl_grip.setAlignment(Qt.AlignCenter)
             h.addWidget(lbl_grip)
             
-            # Unit
             h.addWidget(unit)
             
             # Delete Button
             btn_del = QPushButton("X")
-            btn_del.setFixedSize(20, 50) # Tall thin button
+            btn_del.setFixedSize(20, 50)
             btn_del.setStyleSheet("background-color: #552222;")
             btn_del.clicked.connect(lambda checked=False, e=effect: self.remove_effect(e))
             
             h.addWidget(btn_del)
             
-            # Create List Item
             item = QListWidgetItem(self.list_widget)
             item.setSizeHint(wrapper.sizeHint())
             
@@ -183,7 +158,7 @@ class EffectsRack(QWidget):
             cmd = AddEffectCommand(self, self.current_track, effect_instance)
             self.undo_stack.push(cmd)
             
-        self.combo_add.setCurrentIndex(0) # Reset
+        self.combo_add.setCurrentIndex(0)
         
     def remove_effect(self, effect):
         if self.current_track:

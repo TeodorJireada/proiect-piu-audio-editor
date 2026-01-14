@@ -33,11 +33,6 @@ class TrackContainer(QWidget):
         painter = QPainter(self)
         palette = self.palette()
         
-        # Draw Background Grid
-        # We don't draw a filled rect here because the background color is handled by stylesheet on QWidget#TrackContainer
-        # But we do draw lines.
-        
-        # Calculations
         seconds_per_beat = 60 / getattr(self, "bpm", 120)
         pixels_per_beat = self.pixels_per_second * seconds_per_beat
         

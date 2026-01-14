@@ -43,18 +43,14 @@ class SimpleDelay(AudioEffect):
         read_indices = (np.arange(num_samples) + (self.write_ptr - delay_samples)) % max_delay_samples
         write_indices = (np.arange(num_samples) + self.write_ptr) % max_delay_samples
         
-        # Read from delay line
         delayed_signal = self.buffer[read_indices]
         
-        # Write to delay line: Input + Delayed * Feedback
         to_write = input_buffer + (delayed_signal * feedback)
         
         self.buffer[write_indices] = to_write
         
-        # Advance pointer
         self.write_ptr = (self.write_ptr + num_samples) % max_delay_samples
         
-        # Mix
         output = (input_buffer * (1.0 - wet_mix)) + (delayed_signal * wet_mix)
         
         return output

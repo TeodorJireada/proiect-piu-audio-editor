@@ -27,7 +27,6 @@ class TrackLoader(QThread):
                     # Attempt High-Quality Resampling
                     data = scipy.signal.resample(data, number_of_samples)
                 except MemoryError:
-                    # Fallback: Linear Interpolation (Low RAM usage)
                     print("[TrackLoader] Low RAM fallback for resampling")
                     indices = np.linspace(0, len(data) - 1, number_of_samples)
                     left = np.interp(indices, np.arange(len(data)), data[:, 0])
@@ -58,7 +57,6 @@ class TrackLoader(QThread):
             # Attach the calculated waveform to the object
             track_obj.waveform = waveform
 
-            # Emit the object
             self.loaded.emit(track_obj)
             
         except Exception as e:

@@ -16,12 +16,9 @@ class Distortion(AudioEffect):
         
         drive_amount = 1.0 + (self.parameters["drive"] * 20.0) # 1x to 21x Gain
         
-        # Simple Soft Clipping (ArcTan or Tanh)
-        # Wet signal
-        # Pre-gain
+        # Simple Soft Clipping (ArcTan)
         pre = buffer * drive_amount
         
-        # Waveshaper: (2/pi) * arctan(x) gives range -1 to 1 smoothly
         wet = (2.0 / np.pi) * np.arctan(pre)
         
         mix = self.parameters["mix"]

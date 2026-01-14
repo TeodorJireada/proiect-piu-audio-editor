@@ -9,10 +9,9 @@ class ChannelOperations(QObject):
     def __init__(self, track_manager):
         super().__init__()
         self.tm = track_manager
-        self.temp_volumes = {} # Track index -> start volume
-        self.temp_pans = {}    # Track index -> start pan
+        self.temp_volumes = {}
+        self.temp_pans = {}
 
-        # FX Window Management (Delegated here)
         self.fx_windows = {}
 
     @property
@@ -23,12 +22,10 @@ class ChannelOperations(QObject):
     def left_layout(self):
         return self.tm.left_layout
 
-    # --- Signal Handlers ---
 
     def handle_mute(self):
         sender = self.sender()
         idx = self.left_layout.indexOf(sender) 
-        # Layout index matches track index because of how we add them (insertWidget)
         
         cmd = ToggleMuteCommand(self, idx)
         self.tm.undo_stack.push(cmd)
@@ -46,7 +43,6 @@ class ChannelOperations(QObject):
         
         track_index = layout_index
         
-        # Get old color
         old_color = "#5577cc"
         if 0 <= track_index < len(self.audio.tracks):
              old_color = getattr(self.audio.tracks[track_index], "color", "#5577cc")
@@ -82,7 +78,6 @@ class ChannelOperations(QObject):
         track_index = layout_index
         
         old_volume = self.temp_volumes.get(track_index, 1.0)
-        # Clean up
         if track_index in self.temp_volumes:
             del self.temp_volumes[track_index]
 
@@ -143,7 +138,7 @@ class ChannelOperations(QObject):
         else:
             print(f"DEBUG: Track {track_data.name} not found in audio.tracks")
 
-    # --- Performers (Called by Commands) ---
+    # Performers
 
     def perform_volume_change(self, track_index, volume):
         if 0 <= track_index < len(self.audio.tracks):

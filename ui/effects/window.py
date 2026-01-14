@@ -14,14 +14,11 @@ class EffectsWindow(QWidget):
         self.setWindowTitle(f"FX: {track_data.name}")
         self.resize(400, 500)
         
-        # Setup Shortcuts to forward to Main Window
         self.setup_forwarding_shortcuts()
         
-        # Main Layout
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
         
-        # Embed Rack
         self.rack = EffectsRack(self.undo_stack)
         self.rack.set_track(track_data)
         
@@ -54,7 +51,4 @@ class EffectsWindow(QWidget):
         self.shortcut_save.setContext(Qt.WindowShortcut)
         
     def closeEvent(self, event):
-        # Just hide, don't destroy? Or let TrackManager handle it.
-        # If we destroy, we lose state? No, state is in track_data.
-        # But for window management, TrackManager needs to know.
         super().closeEvent(event)

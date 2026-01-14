@@ -10,7 +10,7 @@ class AudioEngine(QObject):
         self.channels = 2
         self.playhead = 0 # in samples
         self.bpm = 120
-        self.time_signature = (4, 4) # (numerator, denominator)
+        self.time_signature = (4, 4)
         
         print(f"Audio Engine initialized at: {self.sample_rate} Hz")
 
@@ -26,6 +26,8 @@ class AudioEngine(QObject):
         # Metering
         self.track_peaks = {} # Map track object to float 0.0-1.0
         self.master_peak = 0.0
+        self.master_peak_L = 0.0
+        self.master_peak_R = 0.0
 
     def add_track_data(self, track_obj):
         self.tracks.append(track_obj)
@@ -112,7 +114,7 @@ class AudioEngine(QObject):
         
         loop_end_time = next_free_bar * bar_duration
         self.loop_end_sample = int(loop_end_time * self.sample_rate)
-        # print(f"Loop end calculated: {loop_end_time}s (Bar {next_free_bar+1})")
+
 
     # MIXING ENGINE 
     
@@ -134,7 +136,7 @@ class AudioEngine(QObject):
             else:
                 if track.is_muted: continue
 
-            # 1. Sum Clips into Track Buffer
+            # Sum Clips into Track Buffer
             track_buffer = np.zeros((num_frames, 2), dtype='float32')
             
             for clip in track.clips:
@@ -162,56 +164,55 @@ class AudioEngine(QObject):
                         track_buffer[buffer_offset : buffer_offset + read_len] += \
                             clip.data[offset_in_source_data : offset_in_source_data + read_len]
             
-            # 2. Process Effects Chain
+            # Process Effects Chain
             if hasattr(track, 'effects') and not getattr(track, 'fx_bypass', False):
                 for effect in track.effects:
                     if effect.active:
-                        # Process in-place-ish (depends on effect implementation)
                         track_buffer = effect.process(track_buffer, self.sample_rate)
 
-            # 3. Apply Track Volume & Pan
+            # Apply Track Volume & Pan
             pan = track.pan
             left_gain = 1.0 if pan <= 0 else (1.0 - pan)
             right_gain = 1.0 if pan >= 0 else (1.0 + pan)
             
             gains = np.array([left_gain, right_gain], dtype='float32') * track.volume
             
-            # 4. Mix to Master
-            # 4. Mix to Master
+            # Mix to Master
             mix_buffer += track_buffer * gains
             
-            # --- Capture Peak Metering ---
-            # Using simple max abs of the processed buffer
-            # We store it on the track object itself for easy UI retrieval, or in our dict
-            peak = np.max(np.abs(track_buffer)) * track.volume # Apply volume roughly for post-fader meter
+            # Capture Peak Metering
+            peak = np.max(np.abs(track_buffer)) * track.volume
             self.track_peaks[track] = float(peak)
             
             
-        # --- MASTER TRACK PROCESSING ---
+        # MASTER TRACK PROCESSING
         if hasattr(self, 'master_track'):
-             # 1. Effects
              if not getattr(self.master_track, 'fx_bypass', False):
                  for effect in self.master_track.effects:
                      if effect.active:
                          mix_buffer = effect.process(mix_buffer, self.sample_rate)
              
-             # 2. Volume
              mix_buffer *= self.master_track.volume
              
-             # 3. Pan
              pan = self.master_track.pan
              left_gain = 1.0 if pan <= 0 else (1.0 - pan)
              right_gain = 1.0 if pan >= 0 else (1.0 + pan)
              
-             master_gains = np.array([left_gain, right_gain], dtype='float32') # Constant power approximation would be better but keeping linear for now
+             master_gains = np.array([left_gain, right_gain], dtype='float32')
              
              mix_buffer[:, 0] *= master_gains[0]
              mix_buffer[:, 1] *= master_gains[1]
              
-             # Capture Master Peak
-             self.master_peak = float(np.max(np.abs(mix_buffer)))
-        # -------------------------------
-        
+             if len(mix_buffer) > 0:
+                 max_vals = np.max(np.abs(mix_buffer), axis=0)
+                 self.master_peak_L = float(max_vals[0])
+                 self.master_peak_R = float(max_vals[1])
+                 self.master_peak = max(self.master_peak_L, self.master_peak_R) 
+             else:
+                 self.master_peak_L = 0.0
+                 self.master_peak_R = 0.0
+                 self.master_peak = 0.0
+
         return mix_buffer
 
     def export_audio(self, file_path, duration_sec):
@@ -238,7 +239,6 @@ class AudioEngine(QObject):
         outdata[:] = mix_buffer
         self.playhead += frames
 
-        # Loop Check
         if self.is_looping and self.loop_end_sample > 0:
             if self.playhead >= self.loop_end_sample:
-                self.playhead = 0 # Wrap around
+                self.playhead = 0

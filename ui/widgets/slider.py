@@ -41,9 +41,9 @@ class ModernSlider(QSlider):
         # Dimensions
         margin = 4
         if self.orientation() == Qt.Horizontal:
-            track_height = 6 # Slightly thinner track
-            handle_width = 6 # Narrower handle
-            handle_height = 16 # Taller handle
+            track_height = 6 
+            handle_width = 6 
+            handle_height = 16
             
             # Center vertically
             track_y = rect.center().y() - (track_height / 2)
@@ -62,32 +62,19 @@ class ModernSlider(QSlider):
             
             handle_rect = QRectF(handle_x, handle_y, handle_width, handle_height)
             
-            # Draw Continuous Track Background (Inactive part)
-            # We draw the full track first, so there is no "transparency" behind the handle or gaps.
             painter.setPen(Qt.NoPen)
             # Use Window color darkened
             painter.setBrush(palette.color(QPalette.Window).darker(150))
             painter.drawRoundedRect(track_rect, 3, 3)
             
-            # Draw Meter / Active Track
-            # The bar starts from left and goes up to meter_level.
-            
             # Map meter level to pixels
             if track_rect.width() > 0:
                  meter_pixel_width = self.meter_level * track_rect.width()
-                 
-                 # Define the "Gap" point relative to the handle
-                 # The Meter should stop 'gap' pixels before the handle STARTS.
+
                  gap = 3
                  active_limit_x = handle_x - gap
                  
-                 # Calculate where the meter would naturally end
                  natural_meter_end_x = track_rect.x() + meter_pixel_width
-                 
-                 # Clip the meter to the gap if it exceeds it
-                 # If the meter is lower than the gap, it ends naturally.
-                 # If the meter is higher (audio peaking), we visually clamp it to the gap (or just let it hit the gap flatly).
-                 
                  draw_end_x = min(natural_meter_end_x, active_limit_x)
                  
                  if draw_end_x > track_rect.x():
@@ -96,8 +83,6 @@ class ModernSlider(QSlider):
                      start_x = track_rect.left()
                      end_x = draw_end_x
                      
-                     # Check if we are touching the gap limit (implies flat end needed)
-                     # or if we are just drawing a short bar (rounded end)
                      is_clamped_at_gap = (abs(draw_end_x - active_limit_x) < 2)
                      
                      if is_clamped_at_gap:
@@ -112,14 +97,10 @@ class ModernSlider(QSlider):
                          path_meter.lineTo(end_x, track_y) # Close
                          painter.drawPath(path_meter)
                      else:
-                         # Rounded End (standard rounded rect behavior)
-                         # BUT, the left side must match the track's rounded start.
-                         # drawRoundedRect handles corners symmetrically.
-                         # Since the track has radius 3, and we draw inside it, using radius 3 is fine.
                          painter.drawRoundedRect(QRectF(start_x, track_y, end_x - start_x, track_height), 3, 3)
             
         else:
-            # Vertical Slider (if needed later)
+            # Vertical Slider
             track_width = 8
             handle_width = 14
             handle_height = 14
@@ -137,17 +118,13 @@ class ModernSlider(QSlider):
             pass 
 
         # Draw Handle
-        # Use ButtonText color (usually white/bright in dark themes)
         painter.setBrush(palette.color(QPalette.ButtonText))
         painter.setPen(Qt.NoPen)
-        # Full rounded capsule shape (Radius = half width)
-        # Since width 6, radius 3.
         painter.drawRoundedRect(handle_rect, 3, 3)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             # Jump to click position immediately
-            # Calculate value from click position
             if self.orientation() == Qt.Horizontal:
                 val_range = self.maximum() - self.minimum()
                 margin = 4

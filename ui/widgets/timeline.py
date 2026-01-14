@@ -89,7 +89,6 @@ class TimelineRuler(QWidget):
             beat_interval = 32 # Every 8 bars
 
         # Draw Beats/Bars
-        # 4/4 assumption
         beats_total = int(self.duration / seconds_per_beat) + 1
         
         # Calculate visible bars to decide on text visibility

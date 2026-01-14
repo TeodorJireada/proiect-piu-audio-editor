@@ -4,7 +4,6 @@ from ui.widgets.slider import ModernSlider
 from ui.widgets.knob import ModernKnobChunky
 
 class MasterTrackWidget(QFrame):
-    # Signals identical to TrackHeader where possible for compatibility
     pan_changed = Signal(float)
     pan_set = Signal(float)
     dial_pressed = Signal()
@@ -19,12 +18,9 @@ class MasterTrackWidget(QFrame):
         super().__init__(parent)
         self.audio_track = audio_track
         self.setObjectName("MasterTrackWidget")
-        self.setFixedHeight(40) # Matches top-left corner height
+        self.setFixedHeight(40)
         self.setMinimumWidth(0) 
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        
-        # Styles
-        # self.setStyleSheet(...) -> Moved to QSS
 
         # Layout
         layout = QHBoxLayout(self)
@@ -70,8 +66,8 @@ class MasterTrackWidget(QFrame):
         # Volume Slider
         self.slider_volume = ModernSlider(Qt.Horizontal)
         self.slider_volume.setRange(0, 100)
-        self.slider_volume.setValue(100) # Default full volume
-        self.slider_volume.setFixedWidth(80) # Match TrackHeader
+        self.slider_volume.setValue(100)
+        self.slider_volume.setFixedWidth(80)
         self.slider_volume.setToolTip("Master Volume: 100%")
         
         self.slider_volume.valueChanged.connect(self.on_slider_value_changed)

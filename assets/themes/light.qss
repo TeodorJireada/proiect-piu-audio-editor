@@ -1,0 +1,195 @@
+QMainWindow { background-color: #f0f0f0; }
+QWidget { color: #333333; font-family: 'Segoe UI', sans-serif; font-size: 13px; }
+
+/* Ribbon */
+QFrame#Ribbon { background-color: #e0e0e0; border-bottom: 1px solid #cccccc; }
+
+/* Buttons */
+QPushButton { 
+    background-color: #e8e8e8; 
+    border: 1px solid #cccccc; 
+    border-radius: 3px; 
+    padding: 5px; 
+    color: #333333;
+}
+QPushButton:hover { 
+    background-color: #d8d8d8; 
+    border-color: #5577cc;
+    color: #000000;
+}
+QPushButton:pressed { 
+    background-color: #c0c0c0; 
+    color: #000000;
+}
+QPushButton:checked {
+    background-color: #ff8800;
+    color: #000000;
+    border: 1px solid #cc6600;
+}
+
+/* Transport Buttons (Icons Only) */
+QPushButton#TransportButton {
+    background-color: #d8d8d8;
+    border: 1px solid #cccccc;
+    padding: 2px;
+}
+QPushButton#TransportButton:hover {
+    background-color: #c8c8c8;
+    border-radius: 4px;
+}
+QPushButton#TransportButton:pressed {
+    background-color: #b0b0b0;
+    color: #000000;
+}
+QPushButton#TransportButton:checked {
+    background-color: #ff8800;
+    color: #000000;
+    border: 1px solid #cc6600;
+    border-radius: 4px;
+}
+
+/* Tool Buttons (Icons Only, Checkable) */
+QPushButton#ToolButton {
+    background-color: #d8d8d8;
+    border: 1px solid #cccccc;
+    padding: 2px;
+}
+QPushButton#ToolButton:hover {
+    background-color: #c8c8c8;
+    border-radius: 4px;
+}
+QPushButton#ToolButton:pressed {
+    background-color: #b0b0b0;
+    color: #000000;
+}
+QPushButton#ToolButton:checked {
+    background-color: #ff8800;
+    color: #000000;
+    border: 1px solid #cc6600;
+    border-radius: 4px;
+}
+
+/* Scroll Areas */
+QScrollArea { border: none; background-color: #e0e0e0; }
+
+QScrollBar:vertical { background: #f0f0f0; width: 12px; margin: 0px 0px 0px 0px; }
+QScrollBar::handle:vertical { background: #cccccc; min-height: 20px; border-radius: 4px; margin: 2px; }
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }
+
+QScrollBar:horizontal { background: #f0f0f0; height: 12px; margin: 0px 0px 0px 0px; }
+QScrollBar::handle:horizontal { background: #cccccc; min-width: 20px; border-radius: 4px; margin: 2px; }
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0px; }
+QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: none; }
+
+/* Tracks */
+QFrame#TrackHeader, QFrame#MasterTrackWidget { background-color: #e8e8e8; border-bottom: 1px solid #cccccc; border-right: 1px solid #cccccc; }
+QFrame#TrackLane { background-color: transparent; border-bottom: 1px solid #d0d0d0; }
+QWidget#TrackContainer { background-color: #e0e0e0; }
+
+/* Splitter */
+QSplitter::handle { background-color: #cccccc; }
+
+/* Top Left Corner */
+QFrame#TopLeftCorner { background-color: #e0e0e0; border-bottom: 1px solid #cccccc; border-right: 1px solid #cccccc; }
+
+/* Timeline */
+QWidget#TimelineRuler { background-color: #e0e0e0; }
+
+/* Add Track Button */
+QPushButton#AddTrackButton {
+    background-color: #e8e8e8;
+    color: #888;
+    border: 1px dashed #bbb;
+    font-size: 24px;
+    font-weight: bold;
+}
+QPushButton#AddTrackButton:hover {
+    background-color: #e0e0e0;
+    color: #333;
+    border: 1px dashed #999;
+}
+
+/* Track Header Components */
+QLabel#TrackNameLabel { font-weight: bold; font-size: 12px; color: #333333; }
+
+/* Unified Track Header Button Style */
+QFrame#TrackHeader QPushButton, QFrame#MasterTrackWidget QPushButton {
+    background-color: #ffffff;
+    border: 1px solid #cccccc;
+    border-radius: 3px;
+    padding: 2px;
+    color: #333333;
+}
+QFrame#TrackHeader QPushButton:hover, QFrame#MasterTrackWidget QPushButton:hover {
+    background-color: #f0f0f0;
+    border: 1px solid #bbbbbb;
+    color: #000000;
+}
+QFrame#TrackHeader QPushButton:pressed, QFrame#MasterTrackWidget QPushButton:pressed {
+    background-color: #e0e0e0;
+}
+
+/* Specific Button Overrides */
+QPushButton#TrackDeleteButton { 
+}
+QPushButton#TrackDeleteButton:hover { 
+    background-color: #ffcccc;
+    border-color: #ff5555;
+}
+
+/* FX Buttons */
+QPushButton#FXButton { 
+    font-size: 10px; 
+}
+
+QPushButton#FXButton[active_fx="true"] { 
+    background-color: #ddeeff; 
+    border: 1px solid #5577cc; 
+    color: #003366;
+}
+QPushButton#FXButton[active_fx="true"]:hover { background-color: #ccddee; }
+
+QPushButton#FXBypassButton { 
+    color: #888; 
+    font-size: 10px; 
+    font-weight: bold; 
+}
+QPushButton#FXBypassButton:checked { 
+    background-color: #ffaaaa; 
+    color: #000; 
+    border: 1px solid #cc5555; 
+}
+
+/* Mute/Solo State Styles - Scoped for Specificity */
+QFrame#TrackHeader QPushButton[muted="true"] { background-color: #ff8888; color: white; border: 1px solid #ff4444; }
+QFrame#TrackHeader QPushButton[muted="true"]:hover { background-color: #ffaaaa; }
+
+QFrame#TrackHeader QPushButton[muted="false"] { background-color: #ffeeee; color: #cc4444; border: 1px solid #ffcccc; }
+QFrame#TrackHeader QPushButton[muted="false"]:hover { background-color: #ffdddd; }
+
+QFrame#TrackHeader QPushButton[soloed="true"] { background-color: #88ff88; color: black; border: 1px solid #44ff44; }
+QFrame#TrackHeader QPushButton[soloed="true"]:hover { background-color: #aaffaa; }
+
+QFrame#TrackHeader QPushButton[soloed="false"] { background-color: #eeffee; color: #44cc44; border: 1px solid #ccffcc; }
+QFrame#TrackHeader QPushButton[soloed="false"]:hover { background-color: #ddffdd; }
+
+/* Additional System Overrides */
+QMenuBar { background-color: #e0e0e0; color: #333333; }
+QMenuBar::item:selected { background-color: #cccccc; }
+QMenu { background-color: #ffffff; color: #333333; border: 1px solid #cccccc; }
+QMenu::item:selected { background-color: #5577cc; color: white; }
+QToolTip { background-color: #ffffff; color: #333333; border: 1px solid #cccccc; }
+
+QProgressBar {
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    text-align: left;
+    background-color: #fff;
+    color: #0055aa;
+    font-family: monospace;
+    font-weight: bold;
+}
+QProgressBar::chunk {
+    background-color: #88ccff;
+}

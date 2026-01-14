@@ -10,8 +10,8 @@ class TrackLane(QFrame):
     clip_split = Signal(int, float) 
     clip_duplicated = Signal(int, float) 
     clip_deleted = Signal(int)
-    clip_selected = Signal(int) # Emits index immediately on click
-    paste_requested = Signal(float) # Emits time on empty click
+    clip_selected = Signal(int)
+    paste_requested = Signal(float)
     
     def __init__(self):
         super().__init__()
@@ -123,7 +123,6 @@ class TrackLane(QFrame):
 
     def keyReleaseEvent(self, event):
         if event.key() == Qt.Key_Shift:
-            # Refresh cursor state by triggering a move logic check
             pos = self.mapFromGlobal(QCursor.pos())
             self._update_cursor_at(pos)
         super().keyReleaseEvent(event)
@@ -163,7 +162,6 @@ class TrackLane(QFrame):
                     self.handle_delete(clicked_clip_index)
                     return
                 
-                # MOVE TOOL & COPY LOGIC
                 # Always emit selection on click
                 self.clip_selected.emit(clicked_clip_index)
 
@@ -338,26 +336,16 @@ class TrackLane(QFrame):
             width = int(clip['duration'] * self.pixels_per_second)
             
             # Draw Clip Background
-            # Top border 1px lower to be visible
             clip_rect = QRect(start_x, 1, width, self.height() - 2)
             
-            # Use Palette for base background of clip? 
-            # Actually clips are usually colored distinctively. 
-            # But let's use AlternateBase if we wanted theme compliance, 
-            # though here we have custom clip colors.
-            # We'll stick to a dark background that matches the theme "Button" or "Base"
-            # But wait, clips have transparency? 
-            # The previous code used QColor(30, 30, 40) which is very close to Base/Window.
-            # Let's use QPalette.Button for the clip body background if opaque.
-            
-            # Use clip color, but maybe darken it for background?
-            # Or use Theme Base.
-            painter.setBrush(QBrush(palette.color(QPalette.AlternateBase))) 
-            
-            # Determine Color (Highlight if selected)
             base_color = QColor(clip['color'])
+            
+            bg_color = QColor(base_color)
+            bg_color.setAlpha(40)
+            painter.setBrush(QBrush(bg_color))
+            
             if i == self.selected_clip_index:
-                painter.setPen(base_color.lighter(150)) # Lighter border
+                painter.setPen(base_color.lighter(150))
             else:
                 painter.setPen(base_color)        
             
@@ -367,15 +355,13 @@ class TrackLane(QFrame):
             if clip['waveform'] is not None:
                 wave_color = QColor(clip['color'])
                 if i == self.selected_clip_index:
-                    wave_color = wave_color.lighter(130) # Lighten waveform too
+                    wave_color = wave_color.lighter(130)
                 
-                # Fill Color
                 fill_color = QColor(wave_color)
-                fill_color.setAlpha(100) # Semi-transparent fill
+                fill_color.setAlpha(100) 
                 
-                # Stroke Color
                 stroke_color = QColor(wave_color)
-                stroke_color.setAlpha(255) # Opaque stroke
+                stroke_color.setAlpha(255)
 
                 waveform = clip['waveform']
                 original_sps = 100 
@@ -384,11 +370,9 @@ class TrackLane(QFrame):
                 view_min_x = event.rect().left()
                 view_max_x = event.rect().right()
                 
-                # Clip bounds in widget coordinates
                 clip_min_x = start_x
                 clip_max_x = start_x + width
                 
-                # Intersection
                 draw_start_x = max(view_min_x, clip_min_x)
                 draw_end_x = min(view_max_x, clip_max_x)
                 
@@ -422,7 +406,7 @@ class TrackLane(QFrame):
 
                      if points_top and points_bottom:
                          # Create Polygon for Fill
-                         # Top points (Left -> Right) + Bottom points (Right -> Left)
+
                          fill_poly = QPolygonF()
                          for p in points_top:
                              fill_poly.append(p)
@@ -448,16 +432,13 @@ class TrackLane(QFrame):
             painter.drawText(clip_rect.adjusted(5, 5, 0, 0), Qt.AlignLeft | Qt.AlignTop, display_name)
 
         # Draw Playhead
-        # Use Highlight color but make it opaque/solid?
-        playhead_color = palette.color(QPalette.BrightText) # Usually Red or bright in dark themes
-        # If BrightText is not red enough, fallback to Highlight?
-        # ThemeManager sets BrightText to Red (255,0,0). Perfect.
+        playhead_color = palette.color(QPalette.BrightText)
         painter.setPen(QPen(playhead_color, 1))
         
         painter.drawLine(QPointF(self.playhead_x, 0), QPointF(self.playhead_x, self.height()))
 
     def contextMenuEvent(self, event):
-        pass # Disable context menu
+        pass
 
     def handle_split(self, clip_index, click_x):
         split_time = click_x / self.pixels_per_second

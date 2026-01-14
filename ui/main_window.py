@@ -24,7 +24,6 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Python Qt DAW - Audio Engine Active")
         self.resize(1200, 800)
-        # self.setStyleSheet(DARK_THEME) # Handled by ThemeManager
 
         # AUDIO ENGINE
         self.audio = AudioEngine() 
@@ -47,7 +46,6 @@ class MainWindow(QMainWindow):
 
         self.setup_ribbon()
         self.setup_workspace()
-        # self.setup_menu() # Menu removed
         
         self.edit_cursor_time = 0.0
         
@@ -79,7 +77,6 @@ class MainWindow(QMainWindow):
         self.ribbon.export_clicked.connect(self.project_io.on_export_audio)
 
         # Connect Ribbon Signals to Viewport
-        # (Zoom shortcuts are handled via QShortcut below)
 
         # Initialize Logic States from UI Defaults
         self.audio.set_looping(self.ribbon.btn_loop.isChecked())
@@ -153,7 +150,7 @@ class MainWindow(QMainWindow):
         for lane in self.track_manager.lanes:
             if lane.selected_clip_index != -1:
                 lane.handle_duplicate(lane.selected_clip_index)
-                break # Only duplicate one selection at a time
+                break
 
     def setup_ribbon(self):
         self.ribbon = Ribbon()
@@ -168,6 +165,9 @@ class MainWindow(QMainWindow):
         self.ribbon.undo_clicked.connect(self.undo_action)
         self.ribbon.redo_clicked.connect(self.redo_action)
         self.ribbon.tool_changed.connect(self.on_tool_changed)
+        
+        self.ribbon.playhead_seeked.connect(self.on_ribbon_seek)
+        
         self.main_layout.addWidget(self.ribbon)
 
     def on_tool_changed(self, tool_name):
@@ -184,7 +184,6 @@ class MainWindow(QMainWindow):
         left_panel_layout.setContentsMargins(0, 0, 0, 0)
         left_panel_layout.setSpacing(0)
         
-        # Margin fix / Master Track
         from ui.widgets.master_track import MasterTrackWidget
         self.master_track_widget = MasterTrackWidget(self.audio.master_track)
         self.master_track_widget.fx_requested.connect(self.open_master_fx)
@@ -235,12 +234,10 @@ class MainWindow(QMainWindow):
         self.right_layout.setContentsMargins(0, 0, 0, 0)
         self.right_layout.setSpacing(0)
         
-        # 1. Custom Horizontal Scrollbar (Top)
         self.h_scrollbar = QScrollBar(Qt.Horizontal)
         self.h_scrollbar.setFixedHeight(15)
         self.right_layout.addWidget(self.h_scrollbar)
 
-        # 2. Timeline Ruler
         self.timeline = TimelineRuler()
         self.timeline.set_bpm(self.audio.bpm)
         
@@ -252,7 +249,6 @@ class MainWindow(QMainWindow):
         self.timeline_scroll.setFixedHeight(25)
         self.timeline_scroll.setWidget(self.timeline)
         
-        # Wrapper to align timeline with track container (compensate for V-Scrollbar)
         timeline_wrapper = QWidget()
         timeline_wrapper.setFixedHeight(25)
         timeline_layout = QHBoxLayout(timeline_wrapper)
@@ -269,23 +265,22 @@ class MainWindow(QMainWindow):
         
         self.right_layout.addWidget(timeline_wrapper)
 
-        # 3. Track Container (for grid lines and holding lanes)
+        # Track Container
         self.right_scroll = QScrollArea()
         self.right_scroll.setWidgetResizable(True)
         self.right_scroll.setFrameShape(QFrame.NoFrame)
-        self.right_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff) # Use custom top scrollbar
+        self.right_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff) 
         self.right_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
         self.right_scroll.viewport().installEventFilter(self) # Intercept Ctrl+Scroll
 
-        self.right_content = TrackContainer() # This is the widget that draws the grid and holds the track lanes
+        self.right_content = TrackContainer()
         self.right_content.pixels_per_second = self.timeline.pixels_per_second
         self.right_content.set_bpm(self.audio.bpm)
         
-        self.right_inner_layout = QVBoxLayout(self.right_content) # This layout will hold the actual TrackLane widgets
+        self.right_inner_layout = QVBoxLayout(self.right_content)
         self.right_inner_layout.setContentsMargins(0, 0, 0, 0)
         self.right_inner_layout.setSpacing(0)
         
-        # Bottom Spacer to match AddTrackButton height (80px)
         self.right_bottom_spacer = QWidget()
         self.right_bottom_spacer.setFixedHeight(80)
         self.right_inner_layout.addWidget(self.right_bottom_spacer)
@@ -293,13 +288,11 @@ class MainWindow(QMainWindow):
         self.right_inner_layout.addStretch()
         
         self.right_scroll.setWidget(self.right_content)
-        self.right_layout.addWidget(self.right_scroll) # Add the scroll area to the main right_layout
+        self.right_layout.addWidget(self.right_scroll)
         
-        self.track_container = self.right_content # Alias for compatibility
+        self.track_container = self.right_content
+        splitter.addWidget(right_widget)
         
-        splitter.addWidget(right_widget) # Add the main right_widget to the splitter
-        
-        # Fixed Left Panel behavior
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         splitter.setSizes([340, 1000])
@@ -309,11 +302,11 @@ class MainWindow(QMainWindow):
         self.viewport_controller.zoom_to_fit()
 
     def update_zoom(self, px_per_sec):
-        # Delegated to ViewportController
         self.viewport_controller.update_zoom(px_per_sec)
 
     def update_global_duration(self):
         self.track_manager.update_global_duration()
+
 
     # THREADED IMPORT LOGIC
 
@@ -333,7 +326,6 @@ class MainWindow(QMainWindow):
         can_redo = self.undo_stack.can_redo()
         self.ribbon.update_undo_redo_state(can_undo, can_redo)
         
-        # Heuristic feedback
         if can_undo: self.ribbon.set_status("Action Performed")
 
     def toggle_playback(self):
@@ -360,6 +352,11 @@ class MainWindow(QMainWindow):
 
         self.viewport_controller.update_playhead_visuals(cursor_x_pixels, scroll_to_view=False)
 
+    def on_ribbon_seek(self, time_seconds):
+        pixels = int(time_seconds * self.timeline.pixels_per_second)
+        self.audio.set_playhead(pixels, px_per_second=self.timeline.pixels_per_second)
+        self.viewport_controller.update_playhead_visuals(pixels, scroll_to_view=True)
+
     def update_ui(self):
         current_time = self.audio.get_playhead_time()
         
@@ -370,7 +367,10 @@ class MainWindow(QMainWindow):
         x_pixel = int(current_time * self.timeline.pixels_per_second)
         self.viewport_controller.update_playhead_visuals(x_pixel, scroll_to_view=True)
         
+        
         self.track_manager.update_meters()
+        self.ribbon.update_playhead_position(current_time, self.timeline.duration)
+        self.ribbon.update_master_levels(self.audio.master_peak_L, self.audio.master_peak_R)
 
     def zoom_in_step(self):
         self.viewport_controller.perform_zoom_step(1)
@@ -425,10 +425,10 @@ class MainWindow(QMainWindow):
     def eventFilter(self, source, event):
         if event.type() == QEvent.Wheel:
             if event.modifiers() & Qt.ControlModifier:
-                # Intercept Zoom here to prevent ScrollArea from scrolling
+                # Intercept Zoom
                 delta = event.angleDelta().y()
                 self.viewport_controller.perform_zoom(delta, event.globalPosition())
-                return True # Consume event
+                return True
         return super().eventFilter(source, event)
 
     def wheelEvent(self, event):
@@ -479,7 +479,6 @@ class MainWindow(QMainWindow):
         self.project_io.update_dirty_state()
 
     def on_snap_toggled(self, enabled):
-        # Prevent recursion if updated programmatically
         if self.ribbon.btn_snap.isChecked() != enabled: return 
         
         cmd = ToggleSnapCommand(self, enabled)

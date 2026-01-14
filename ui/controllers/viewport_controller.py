@@ -26,7 +26,7 @@ class ViewportController(QObject):
         self.setup_sync_scrollbars()
 
     def setup_sync_scrollbars(self):
-        # 1. Vertical Sync: Left Scroll <-> Right Scroll
+        # Vertical Sync: Left Scroll <-> Right Scroll
         self.left_scroll.verticalScrollBar().valueChanged.connect(
             self.right_scroll.verticalScrollBar().setValue
         )
@@ -34,7 +34,7 @@ class ViewportController(QObject):
             self.left_scroll.verticalScrollBar().setValue
         )
         
-        # 2. Horizontal Sync: Top HBuffer <-> Timeline Scroll <-> Right Scroll
+        # Horizontal Sync: Top HBuffer <-> Timeline Scroll <-> Right Scroll
         def sync_h(val):
             if self.timeline_scroll.horizontalScrollBar().value() != val:
                 self.timeline_scroll.horizontalScrollBar().setValue(val)
@@ -197,6 +197,9 @@ class ViewportController(QObject):
     def update_playhead_visuals(self, x, scroll_to_view=False):
         self.timeline.set_playhead(x)
         self.track_manager.update_playhead_visuals(x)
+        
+        current_time = x / self.timeline.pixels_per_second
+        self.mw.ribbon.update_playhead_position(current_time, self.timeline.duration)
             
         if scroll_to_view:
              viewport_width = self.right_scroll.viewport().width()
@@ -204,4 +207,7 @@ class ViewportController(QObject):
              
              if x > current_scroll + viewport_width:
                  target_scroll = x
+                 self.right_scroll.horizontalScrollBar().setValue(int(target_scroll))
+             elif x < current_scroll:
+                 target_scroll = max(0, x - viewport_width + 50) # Page back, keeping playhead near right edge
                  self.right_scroll.horizontalScrollBar().setValue(int(target_scroll))

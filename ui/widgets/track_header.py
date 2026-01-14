@@ -9,7 +9,7 @@ class ColorStrip(QFrame):
 
     def __init__(self, color_hex):
         super().__init__()
-        self.setFixedWidth(8) # Slightly wider for better clickability
+        self.setFixedWidth(8)
         self.setCursor(Qt.PointingHandCursor)
         self.current_color = color_hex
         self.update_color(color_hex)
@@ -26,7 +26,6 @@ class ColorStrip(QFrame):
     def show_color_menu(self, pos):
         menu = QMenu(self)
         
-        # Consistent Palette
         colors = {
             "Blue": "#4466aa",
             "Red": "#aa4444",
@@ -55,17 +54,17 @@ class TrackHeader(QFrame):
     mute_clicked = Signal()
     solo_clicked = Signal()
     delete_clicked = Signal()
-    slider_pressed = Signal() # New signal for undo start state
+    slider_pressed = Signal() 
     
     pan_changed = Signal(float)
     pan_set = Signal(float)
     dial_pressed = Signal()
     
-    volume_changed = Signal(float) # Emitted on drag (real-time)
-    volume_set = Signal(float)     # Emitted on release (undo)
-    color_changed = Signal(str) # New Signal
+    volume_changed = Signal(float) 
+    volume_set = Signal(float)     
+    color_changed = Signal(str)
     clicked = Signal()
-    fx_requested = Signal() # New Signal
+    fx_requested = Signal()
     fx_bypass_toggled = Signal(bool)
 
     def __init__(self, name, color_hex):
@@ -77,9 +76,9 @@ class TrackHeader(QFrame):
         self.is_muted = False
         self.is_soloed = False
         
-        # Main Layout (Horizontal to put Strip on far left)
+        # Main Layout
         main_layout = QHBoxLayout(self)
-        main_layout.setContentsMargins(0, 0, 0, 0) # NO MARGINS for flush fit
+        main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
         
         # Color Strip
@@ -87,7 +86,7 @@ class TrackHeader(QFrame):
         self.color_strip.color_selected.connect(self.color_changed.emit)
         main_layout.addWidget(self.color_strip)
         
-        # Content Container (for the rest of the header)
+        # Content Container 
         content_widget = QWidget()
         main_layout.addWidget(content_widget)
         

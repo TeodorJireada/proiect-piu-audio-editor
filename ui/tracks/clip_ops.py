@@ -21,7 +21,7 @@ class ClipOperations(QObject):
     def lanes(self):
         return self.tm.lanes
 
-    # --- Signal Handlers (Connected by TrackManager) ---
+    # Signal Handlers (Connected by TrackManager)
 
     def on_clip_moved(self, clip_index, old_start_time, new_start_time):
         sender_lane = self.sender()
@@ -110,7 +110,6 @@ class ClipOperations(QObject):
             self.clipboard_clip = track.clips[clip_index]
             self.clipboard_source_lane = lane_index
             
-            # Sanitize name for display
             display_name = os.path.basename(self.clipboard_clip.name)
             self.tm.status_update.emit(f"Copied Clip: {display_name}")
 
@@ -130,7 +129,7 @@ class ClipOperations(QObject):
         self.tm.status_update.emit("Pasted Clip")
 
 
-    # --- Performers (Called by Commands) ---
+    # Performers (Called by Commands)
 
     def perform_move_clip(self, lane_index, clip_index, new_start):
         if 0 <= lane_index < len(self.lanes):
@@ -188,13 +187,8 @@ class ClipOperations(QObject):
                         waveform=original_clip.waveform
                     )
                     
-                    # Update first clip
                     original_clip.duration = relative_split
-                    
-                    # Insert new clip
                     track.clips.insert(clip_index + 1, new_clip)
-                    
-                    # Update UI
                     self.tm.refresh_lane(lane_index)
 
             self.tm.update_global_duration()
@@ -214,7 +208,6 @@ class ClipOperations(QObject):
                     # Remove second clip
                     track.clips.pop(clip_index + 1)
                     
-                    # Update UI
                     self.tm.refresh_lane(lane_index)
             
             self.tm.update_global_duration()

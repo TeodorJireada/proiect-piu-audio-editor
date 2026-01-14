@@ -20,7 +20,6 @@ QPushButton:hover { background-color: #00ffff; color: #000000; }
 QPushButton:pressed { background-color: #ffffff; color: #000000; }
 
 /* Transport Buttons (Icons Only) - High Contrast */
-/* We keep borders here for accessibility/visibility */
 QPushButton#TransportButton {
     background-color: transparent;
     border: 2px solid white;
@@ -46,7 +45,7 @@ QPushButton#ToolButton:hover {
     border-color: #00ffff;
 }
 QPushButton#ToolButton:checked {
-    background-color: #ffff00; /* Yellow for selection */
+    background-color: #ffff00;
     color: black;
     border: 3px solid #ffff00;
 }
@@ -110,3 +109,16 @@ QMenuBar { background-color: #000000; color: #ffffff; border-bottom: 2px solid #
 QMenuBar::item:selected { background-color: #ffffff; color: #000000; }
 QMenu { background-color: #000000; color: #ffffff; border: 2px solid #ffffff; }
 QMenu::item:selected { background-color: #ffff00; color: #000000; }
+
+QProgressBar {
+    border: 2px solid #fff;
+    border-radius: 0px;
+    text-align: left;
+    background-color: #000;
+    color: #00ff00;
+    font-family: monospace;
+    font-weight: bold;
+}
+QProgressBar::chunk {
+    background-color: #fff;
+}

@@ -35,13 +35,9 @@ class TrackManager(QObject):
         self.current_tool = "MOVE"
         self.snap_enabled = False
         
-        # Sub-Managers (Now "Operations" and "Handlers")
         self.clip_ops = ClipOperations(self)
         self.channel_ops = ChannelOperations(self)
         self.session_handler = SessionHandler(self)
-        
-        # FX Window Management (Delegated to ChannelOperations logic)
-        # We ensure ChannelOperations initializes its fx_windows dict (it does).
 
     def set_active_tool(self, tool_name):
         self.current_tool = tool_name
@@ -116,7 +112,6 @@ class TrackManager(QObject):
         # Create Header
         filename = os.path.basename(track_data.name)
         
-        # Use saved color or default if not present
         color = getattr(track_data, "color", "#4466aa")
         
         header = TrackHeader(filename, color)
@@ -135,7 +130,6 @@ class TrackManager(QObject):
         header.fx_requested.connect(lambda t=track_data: self.on_fx_requested(t))
         header.fx_bypass_toggled.connect(lambda c, t=track_data: self.channel_ops.on_fx_bypass_toggled(t, c))
         
-        # Initialize FX count
         header.update_fx_count(len(track_data.effects))
         
         # Connect Pan Signals
@@ -154,8 +148,8 @@ class TrackManager(QObject):
         lane.set_zoom(self.timeline.pixels_per_second)
         lane.set_duration(self.timeline.duration)
         lane.set_tool(self.current_tool)
-        lane.set_snap_enabled(self.snap_enabled) # Apply Snap
-        lane.set_bpm(self.audio.bpm) # Apply BPM
+        lane.set_snap_enabled(self.snap_enabled)
+        lane.set_bpm(self.audio.bpm)
         
         # Connect Lane Signals to ClipOperations
         lane.clip_moved.connect(self.clip_ops.on_clip_moved)
@@ -208,7 +202,6 @@ class TrackManager(QObject):
             self.lanes.pop(index)
 
         # Remove widgets
-        # Header index: index
         header_item = self.left_layout.takeAt(index)
         if header_item: header_item.widget().deleteLater()
 
@@ -235,7 +228,7 @@ class TrackManager(QObject):
         cmd = DeleteTrackCommand(self, track_index)
         self.undo_stack.push(cmd)
 
-    # --- Delegated Methods (Facade for Commands) ---
+    # Delegated Methods (Facade for Commands)
     
     # Clip Operations
     def perform_move_clip(self, *args):
@@ -305,11 +298,9 @@ class TrackManager(QObject):
     def perform_toggle_fx_bypass(self, *args):
         self.channel_ops.perform_toggle_fx_bypass(*args)
 
-    # --- Loading ---
     def load_project(self, file_path):
         self.session_handler.load_project(file_path)
 
-    # --- FX ---
     def on_fx_requested(self, track_data):
         from ui.effects.window import EffectsWindow
         
@@ -357,10 +348,9 @@ class TrackManager(QObject):
             self.channel_ops.fx_windows[window_key] = window
             window.show()
 
-    # --- Helpers ---
+    # Helpers
 
     def get_header_widget(self, track_index):
-        # 0-th item is probably valid, but our insertion logic uses index + 1
         item = self.left_layout.itemAt(track_index)
         if item and item.widget():
             return item.widget()
@@ -394,7 +384,6 @@ class TrackManager(QObject):
                 )
 
     def update_global_duration(self):
-        # Calculate bar duration (assuming 4/4)
         bpm = getattr(self.timeline, 'bpm', 120)
         if bpm <= 0: bpm = 120
         

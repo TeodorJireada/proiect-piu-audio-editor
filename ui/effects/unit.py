@@ -10,7 +10,7 @@ class EffectUnit(QGroupBox):
         super().__init__(parent)
         self.effect = effect
         self.undo_stack = undo_stack
-        self.dials = {} # name -> DraggableDial
+        self.dials = {}
 
         self.setTitle(effect.name)
         self.setCheckable(True)
@@ -18,18 +18,14 @@ class EffectUnit(QGroupBox):
         self.toggled.connect(self.on_toggle)
         
         self.layout = QHBoxLayout(self)
-        self.layout.setContentsMargins(5, 15, 5, 5) # Top margin for title
+        self.layout.setContentsMargins(5, 15, 5, 5)
         
         self.setup_ui()
         
     def on_toggle(self, active):
-        # We need to distinguish between user click and command update
-        # QGroupBox emits toggled even if setChecked called programmatically?
-        # Yes. To avoid loop, usually verify state.
         if self.effect.active != active:
              cmd = ToggleEffectCommand(self, self.effect)
              self.undo_stack.push(cmd)
-             # But the checkbox is already toggled. If undo happens, we toggle it back.
         
     def setup_ui(self):
         for name, value in self.effect.parameters.items():
@@ -40,7 +36,6 @@ class EffectUnit(QGroupBox):
             lbl_name = QLabel(name.replace("_", " ").title())
             lbl_name.setAlignment(Qt.AlignCenter)
             
-            # Determine Default
             default_val = 0
             if "gain" in name: default_val = 50
             if "mix" in name: default_val = 100
@@ -71,7 +66,6 @@ class EffectUnit(QGroupBox):
                 dial.setValue(int(value * 100))
                 dial.valueChanged.connect(lambda v, n=name: self.on_val_change(n, v, 0.01))
                 
-            # Connect Press/Release for Undo
             dial.sliderPressed.connect(lambda n=name: self.on_dial_pressed(n))
             dial.sliderReleased.connect(lambda n=name: self.on_dial_released(n))
             
@@ -98,11 +92,9 @@ class EffectUnit(QGroupBox):
 
     # Undo Logic
     def on_dial_pressed(self, name):
-        # Capture start value from effect (source of truth)
         self.dials[name]._start_val = self.effect.parameters[name]
 
     def on_dial_released(self, name):
-        # Push command
         new_val = self.effect.parameters[name]
         old_val = self.dials[name]._start_val
         
@@ -111,7 +103,6 @@ class EffectUnit(QGroupBox):
             self.undo_stack.push(cmd)
 
     def update_ui_from_param(self, name, value):
-        # Called by Undo/Redo to sync UI
         dial = self.dials.get(name)
         if not dial: return
         

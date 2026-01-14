@@ -6,56 +6,71 @@ QFrame#Ribbon { background-color: #3c3c3c; border-bottom: 1px solid #1a1a1a; }
 
 /* Buttons */
 QPushButton { 
-    background-color: #444444; 
-    border: 1px solid #202020; 
+    background-color: #252525;
+    border: 1px solid #1a1a1a; 
     border-radius: 3px; 
     padding: 5px; 
     color: #cccccc;
 }
 QPushButton:hover { 
-    background-color: #5577cc; /* Vivid Blue hover for Ribbon actions */
-    border-color: #7799ff;
+    background-color: #454545; 
+    border-color: #5577cc;
     color: #ffffff;
 }
 QPushButton:pressed { 
-    background-color: #333333; 
+    background-color: #111111;
+    color: #ffffff;
+}
+QPushButton:checked {
+    background-color: #ff8800;
+    color: #000000;
+    border: 1px solid #cc6600;
 }
 
 /* Transport Buttons (Icons Only) */
 QPushButton#TransportButton {
-    background-color: transparent;
-    border: none;
+    background-color: #252525;
+    border: 1px solid #1a1a1a;
     padding: 2px;
 }
 QPushButton#TransportButton:hover {
-    background-color: rgba(255, 255, 255, 0.1);
+    background-color: #454545;
     border-radius: 4px;
 }
 QPushButton#TransportButton:pressed {
-    background-color: rgba(255, 255, 255, 0.2);
+    background-color: #111111;
+    color: #ffffff;
+}
+QPushButton#TransportButton:checked {
+    background-color: #ff8800;
+    color: #000000;
+    border: 1px solid #cc6600;
+    border-radius: 4px;
 }
 
 /* Tool Buttons (Icons Only, Checkable) */
 QPushButton#ToolButton {
-    background-color: transparent;
-    border: none;
+    background-color: #252525;
+    border: 1px solid #1a1a1a;
     padding: 2px;
 }
 QPushButton#ToolButton:hover {
-    background-color: rgba(255, 255, 255, 0.1);
+    background-color: #454545;
     border-radius: 4px;
 }
 QPushButton#ToolButton:pressed {
-    background-color: rgba(255, 255, 255, 0.2);
+    background-color: #111111;
+    color: #ffffff;
 }
 QPushButton#ToolButton:checked {
-    background-color: rgba(85, 119, 204, 0.5); /* Highlight Blue */
-    border: 1px solid #5577cc;
+    background-color: #ff8800;
+    color: #000000;
+    border: 1px solid #cc6600;
     border-radius: 4px;
 }
 
 /* Scroll Areas */
-QScrollArea { border: none; background-color: #252525; }
+QScrollArea { border: none; background-color: #121212; }
 
 QScrollBar:vertical { background: #2b2b2b; width: 12px; margin: 0px 0px 0px 0px; }
 QScrollBar::handle:vertical { background: #505050; min-height: 20px; border-radius: 4px; margin: 2px; }
@@ -68,18 +83,18 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0px; }
 QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: none; }
 
 /* Tracks */
-QFrame#TrackHeader { background-color: #333333; border-bottom: 1px solid #1a1a1a; border-right: 1px solid #1a1a1a; }
+QFrame#TrackHeader, QFrame#MasterTrackWidget { background-color: #333333; border-bottom: 1px solid #1a1a1a; border-right: 1px solid #1a1a1a; }
 QFrame#TrackLane { background-color: transparent; border-bottom: 1px solid #303030; }
-QWidget#TrackContainer { background-color: #252525; }
+QWidget#TrackContainer { background-color: #121212; }
 
 /* Splitter */
 QSplitter::handle { background-color: #111; }
 
 /* Top Left Corner */
-QFrame#TopLeftCorner { background-color: #252525; border-bottom: 1px solid #1a1a1a; border-right: 1px solid #1a1a1a; }
+QFrame#TopLeftCorner { background-color: #121212; border-bottom: 1px solid #1a1a1a; border-right: 1px solid #1a1a1a; }
 
 /* Timeline */
-QWidget#TimelineRuler { background-color: #252525; }
+QWidget#TimelineRuler { background-color: #121212; }
 
 /* Add Track Button */
 QPushButton#AddTrackButton {
@@ -119,7 +134,7 @@ QFrame#TrackHeader QPushButton:pressed, QFrame#MasterTrackWidget QPushButton:pre
 QPushButton#TrackDeleteButton { 
 }
 QPushButton#TrackDeleteButton:hover { 
-    background-color: #ff3333; /* Vivid Red */
+    background-color: #ff3333;
     border-color: #ff5555;
 }
 
@@ -165,3 +180,16 @@ QMenuBar::item:selected { background-color: #505050; }
 QMenu { background-color: #333; color: #e0e0e0; border: 1px solid #202020; }
 QMenu::item:selected { background-color: #5577cc; color: white; }
 QToolTip { background-color: #333; color: #e0e0e0; border: 1px solid #555; }
+
+QProgressBar {
+    border: 1px solid #555;
+    border-radius: 4px;
+    text-align: left;
+    background-color: #111;
+    color: #88ccff;
+    font-family: monospace;
+    font-weight: bold;
+}
+QProgressBar::chunk {
+    background-color: #4466aa;
+}

@@ -4,7 +4,7 @@ class AddTrackCommand(Command):
     def __init__(self, track_manager, track_data):
         self.track_manager = track_manager
         self.track_data = track_data
-        self.track_index = -1 # Will be set after execution
+        self.track_index = -1 
 
     def execute(self):
         self.track_index = self.track_manager.perform_add_track(self.track_data)
@@ -16,7 +16,7 @@ class DeleteTrackCommand(Command):
     def __init__(self, track_manager, track_index):
         self.track_manager = track_manager
         self.track_index = track_index
-        self.track_data = None # To save state
+        self.track_data = None 
 
     def execute(self):
         self.track_data = self.track_manager.get_track_data(self.track_index)
@@ -269,14 +269,14 @@ class ChangeEffectParamCommand(Command):
         try:
             self.effect_unit.update_ui_from_param(self.param_name, self.new_value)
         except RuntimeError:
-            pass # Widget might be deleted (window closed)
+            pass 
         
     def undo(self):
         self.effect.parameters[self.param_name] = self.old_value
         try:
             self.effect_unit.update_ui_from_param(self.param_name, self.old_value)
         except RuntimeError:
-            pass # Widget might be deleted
+            pass
 
 class ReorderEffectCommand(Command):
     def __init__(self, effects_rack, track, old_index, new_index):
@@ -336,7 +336,7 @@ class ChangeMasterPanCommand(Command):
         if self.master_widget:
             try:
                 self.master_widget.dial_pan.blockSignals(True)
-                self.master_widget.dial_pan.setValue(self.new_pan * 100) # Dial uses -100 to 100
+                self.master_widget.dial_pan.setValue(self.new_pan * 100)
                 self.master_widget.dial_pan.blockSignals(False)
             except RuntimeError:
                 pass
